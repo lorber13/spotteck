@@ -16,8 +16,8 @@ Spotify continua a suonare in background silenzioso, mentre tu hai a portata di 
 
 | File di Installazione | Piattaforma | Download Diretto |
 | :--- | :--- | :--- |
-| **Spotteck Installer (DMG)** | macOS (Apple Silicon arm64) | [**Scarica Spotteck-1.0.0-arm64.dmg**](../../releases/latest) |
-| **Spotteck Archivio (ZIP)** | macOS (Apple Silicon arm64) | [**Scarica Spotteck-1.0.0-arm64-mac.zip**](../../releases/latest) |
+| **Spotteck Installer (DMG)** | macOS (Apple Silicon arm64) | [**Scarica Spotteck-1.0.0-arm64.dmg**](https://github.com/marcovernetto-lgtm/spotteck/releases/download/v1.0.0/Spotteck-1.0.0-arm64.dmg) |
+| **Spotteck Archivio (ZIP)** | macOS (Apple Silicon arm64) | [**Scarica Spotteck-1.0.0-arm64-mac.zip**](https://github.com/marcovernetto-lgtm/spotteck/releases/download/v1.0.0/Spotteck-1.0.0-arm64-mac.zip) |
 
 > 📖 **Guida Completa di Installazione & Uso:**  
 > Per le istruzioni dettagliate passo-passo consulta la [**Guida Ufficiale (SETUP_GUIDE.md)**](SETUP_GUIDE.md).
