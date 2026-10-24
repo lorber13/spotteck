@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; media-src 'self' http://127.0.0.1:* https: blob: data:; connect-src 'self' http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>Spotteck</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="faceplate" class="faceplate">
+    <div class="anodized-grain"></div>
+    <!-- Drag strip only: the traffic lights are the native macOS ones -->
+    <div class="drag-strip"></div>
+
+    <!-- Top-Right Fullscreen / Hide Playlists Toggle Button -->
+    <button id="zenBtn" class="zen-btn" aria-label="Tutto Schermo">
+      <svg id="zenIcon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+        <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+      </svg>
+    </button>
+
+    <!-- LEFT BAY: instrument + transport -->
+    <section class="left-bay">
+      <img id="bgArtwork" class="bg-artwork" alt="">
+      <div class="bg-vignette"></div>
+
+      <!-- 7. Aether-Morph High Aura (Full-Screen / Full-Bleed outside circle) -->
+      <div id="aetherAuraView" class="aether-aura-full hidden">
+        <div id="aetherAuraGlow" class="aether-aura-glow"></div>
+        <canvas id="aetherAuraCanvas" class="aether-aura-canvas"></canvas>
+      </div>
+
+      <!-- Hold Option (Alt) Aether-Morph Studio HUD (ONLY for Full-Screen Aura Blob) -->
+      <div id="aetherHud" class="aether-hud hidden">
+        <div class="aether-hud-panel">
+          <div class="aether-hud-head">
+            <div class="aether-hud-brand">
+              <span class="led on"></span>
+              <span class="aether-hud-title">AETHER AURA</span>
+            </div>
+            <button id="hudResetBtn" class="key key-wide hud-reset-btn">Ripristina</button>
+          </div>
+
+          <div class="aether-hud-grid">
+            <div class="hud-ctrl">
+              <div class="hud-ctrl-top"><span>Biomassa</span><span id="hudBiomassVal">50%</span></div>
+              <input id="hudBiomass" class="hud-slider" type="range" min="30" max="150" step="10" value="50">
+            </div>
+            <div class="hud-ctrl">
+              <div class="hud-ctrl-top"><span>Morfologia</span><span id="hudMorphingVal">50%</span></div>
+              <input id="hudMorphing" class="hud-slider" type="range" min="20" max="160" step="10" value="50">
+            </div>
+            <div class="hud-ctrl">
+              <div class="hud-ctrl-top"><span>Aura</span><span id="hudAuraVal">100%</span></div>
+              <input id="hudAura" class="hud-slider" type="range" min="0" max="100" step="10" value="100">
+            </div>
+            <div class="hud-ctrl">
+              <div class="hud-ctrl-top"><span>Vibranza</span><span id="hudVibranceVal">100%</span></div>
+              <input id="hudVibrance" class="hud-slider" type="range" min="0" max="160" step="10" value="100">
+            </div>
+            <div class="hud-ctrl hud-ctrl-row">
+              <span class="hud-ctrl-lbl">Sfondo</span>
+              <div class="hud-seg">
+                <button id="hudBgColor" class="hud-seg-btn active" type="button">Colorato</button>
+                <button id="hudBgBlack" class="hud-seg-btn" type="button">Nero</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="stage" class="stage">
+        <!-- 1. Oscilloscope -->
+        <div id="scopeView" class="view">
+          <div class="scope-bezel">
+            <div class="scope-crt">
+              <canvas id="scopeCanvas"></canvas>
+              <div class="scope-rim"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Cassette -->
+        <div id="cassetteView" class="view hidden">
+          <div class="cassette-well">
+            <canvas id="cassetteCanvas"></canvas>
+            <div class="glass"></div>
+          </div>
+        </div>
+
+        <!-- 3. Dual VU -->
+        <div id="vuView" class="view hidden">
+          <div class="vu-pair">
+            <div class="meter-bezel"><div class="meter-well"><canvas id="vuL"></canvas><div class="glass"></div></div></div>
+            <div class="meter-bezel"><div class="meter-well"><canvas id="vuR"></canvas><div class="glass"></div></div></div>
+          </div>
+        </div>
+
+        <!-- 4. Vinyl Turntable -->
+        <div id="vinylView" class="view hidden">
+          <div class="deck-well">
+            <canvas id="vinylCanvas"></canvas>
+            <div class="glass"></div>
+          </div>
+        </div>
+
+        <!-- 5. Aether-Morph (Compact Blob inside Circle) -->
+        <div id="aetherBlobView" class="view hidden">
+          <div class="scope-bezel">
+            <div class="scope-crt">
+              <canvas id="aetherBlobCanvas"></canvas>
+              <div class="scope-rim"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6. Aether-Morph (Macro Large Blob inside Circle) -->
+        <div id="aetherMacroView" class="view hidden">
+          <div class="scope-bezel">
+            <div class="scope-crt">
+              <canvas id="aetherMacroCanvas"></canvas>
+              <div class="scope-rim"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="presetToast" class="preset-toast"></div>
+      </div>
+
+      <div id="nowPlaying" class="now-playing">
+        <div id="nowPlayingControls" class="now-playing-controls">
+          <div id="trackName" class="track-name">Spotteck</div>
+          <div id="artistName" class="artist-name">Connessione a Spotify…</div>
+          <div class="transport">
+            <button id="prevBtn" class="key" aria-label="Indietro">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2.2v12H6V6zm3.8 6l8.2 5.8V6.2L9.8 12z"/></svg>
+            </button>
+            <button id="playBtn" class="key key-orange" aria-label="Play / Pausa">
+              <svg id="playIcon" width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <button id="nextBtn" class="key" aria-label="Avanti">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M6 17.8L14.2 12 6 6.2v11.6zM15.8 6v12H18V6h-2.2z"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="progressBar" class="progress-bar">
+          <div class="progress-track">
+            <div id="progressFill" class="progress-fill"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT BAY: playlists -->
+    <aside class="right-bay">
+      <div class="playlist-well">
+        <div id="playlistGrid" class="playlist-grid"></div>
+
+        <!-- Playlist detail (right-click) -->
+        <div id="drawer" class="drawer">
+          <div class="drawer-head">
+            <img id="drawerCover" class="drawer-cover" alt="">
+            <div class="drawer-title-wrap">
+              <div id="drawerTitle" class="drawer-title"></div>
+              <button id="drawerPlayAll" class="drawer-link">Riproduci tutta</button>
+            </div>
+            <button id="drawerClose" class="drawer-close" aria-label="Chiudi">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <div id="drawerList" class="drawer-list"></div>
+          <button id="drawerRemove" class="drawer-remove">Rimuovi da Spotteck</button>
+        </div>
+      </div>
+
+      <!-- Bottom Bar: Shuffle (Left, key-wide) · Volume Slider (Center, 100% default) · Settings (Right, key-wide) -->
+      <div class="right-foot">
+        <button id="shuffleBtn" class="key key-wide latched" aria-label="Riproduzione casuale">
+          <span id="shuffleDot" class="led on"></span>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/>
+          </svg>
+        </button>
+
+        <div class="vol-wrap">
+          <svg class="vol-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+          </svg>
+          <input id="volumeSlider" class="vol-slider" type="range" min="0" max="100" value="100">
+        </div>
+
+        <button id="settingsBtn" class="key key-wide" aria-label="Impostazioni">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Add playlist Modal -->
+    <div id="addModal" class="modal">
+      <div class="modal-box">
+        <div class="modal-title">Aggiungi una playlist</div>
+        <div class="modal-sub">In Spotify: Condividi → Copia link alla playlist, poi incollalo qui.</div>
+        <input id="addInput" class="modal-input" type="text" placeholder="https://open.spotify.com/playlist/…" spellcheck="false">
+        <div id="addError" class="modal-error"></div>
+        <div class="modal-actions">
+          <button id="addCancel" class="key key-wide">Annulla</button>
+          <button id="addConfirm" class="key key-orange key-wide">Aggiungi</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings & Spotify Profile Modal (Refined Braun Hardware Design) -->
+    <div id="settingsModal" class="modal">
+      <div class="modal-box settings-box">
+        <div class="settings-head">
+          <div class="settings-title-group">
+            <span class="settings-kicker">SPOTTECK · SYSTEM</span>
+            <div class="modal-title">Impostazioni</div>
+          </div>
+          <button id="settingsClose" class="drawer-close" aria-label="Chiudi">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-label">Account Spotify</div>
+          <div class="profile-well">
+            <div class="profile-card">
+              <div id="profileAvatar" class="profile-avatar">S</div>
+              <div class="profile-info">
+                <div id="profileName" class="profile-name">Verifica connessione…</div>
+                <div id="profileSub" class="profile-sub">Spotify</div>
+              </div>
+              <span id="profileLed" class="led"></span>
+            </div>
+            <div class="profile-actions">
+              <button id="profileLoginBtn" class="key key-orange key-wide">Cambia Account</button>
+              <button id="profileLogoutBtn" class="key key-wide">Disconnetti</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-label-row">
+            <span class="settings-label">Modalità Tutto Schermo</span>
+          </div>
+          <div class="vis-checklist">
+            <div id="zenHideHudRow" class="vis-item checked">
+              <span>Nascondi tasti e nome canzone</span>
+              <div id="zenHideHudBox" class="vis-toggle">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#FFF" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-label-row">
+            <span class="settings-label">Strumenti nel Quadrante</span>
+            <button id="visSelectAll" class="drawer-link">Tutti attivi</button>
+          </div>
+          <div id="visChecklist" class="vis-checklist"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="visualizers.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

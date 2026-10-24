@@ -1,0 +1,35 @@
+{
+  "name": "spotteck",
+  "productName": "Spotteck",
+  "version": "1.0.0",
+  "description": "Minimalist Braun-inspired Spotify Deck & Analog Visualizer",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.braun.spotteck",
+    "mac": {
+      "category": "public.app-category.music",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "build/icon.icns",
+      "identity": null
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  }
+}
