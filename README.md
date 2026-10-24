@@ -6,9 +6,9 @@
 ---
 
 ### Che cos'è Spotteck?
-Il punto di forza di **Spotteck** è semplice: **elimina completamente la complessa e distraente interfaccia grafica di Spotify**, trasformando l'ascolto in un'esperienza minimale, focalizzata e priva di distrazioni.
+**Una nuova interfaccia per Spotify. Più bella, essenziale ed elegante.**
 
-Spotify continua a suonare in background silenzioso, mentre tu hai a portata di mano un telecomando compatto ispirato al design industriale **Braun** (Dieter Rams), arricchito da eleganti visualizzatori analogici animati in tempo reale a **60 FPS**.
+Elimina il disordine e le distrazioni dell'app ufficiale, trasformando Spotify in un telecomando compatto ispirato al design industriale **Braun** (Dieter Rams), con eleganti strumenti analogici animati a **60 FPS** (oscilloscopio CRT, cassetta a nastro, VU meter, vinile e fluido Aether-Morph).
 
 ---
 
@@ -66,3 +66,7 @@ npm run pack
 # Genera l'installer .dmg
 npm run dist
 ```
+
+---
+
+<sub>*Disclaimer: Spotteck è un progetto open-source indipendente e non è affiliato, sponsorizzato o approvato da Spotify AB. Spotify è un marchio registrato di Spotify AB.*</sub>
