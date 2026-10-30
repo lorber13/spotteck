@@ -34,10 +34,9 @@ class PremiumPlayer {
     if (this.error) throw new Error(this.error);
     const epoch = this.generation;
     // Activate only our receiver, never whichever device happens to be active.
-    const devices = await this.request('GET', '/me/player/devices');
+    const active = await this.deviceActive();
     if (epoch !== this.generation) throw new Error('Riproduzione annullata.');
-    if (!devices?.ok) throw new Error('Impossibile verificare il lettore di Spotteck.');
-    if (!devices.data?.devices?.some((d) => d.id === this.deviceId && d.is_active)) {
+    if (!active) {
       const transfer = await this.request('PUT', '/me/player', { device_ids: [this.deviceId], play: false });
       if (!transfer?.ok) throw new Error('Impossibile attivare il lettore di Spotteck.');
     }
@@ -46,6 +45,12 @@ class PremiumPlayer {
     if (!result?.ok) throw new Error('Comando Spotify non riuscito. Controlla la connessione e riprova.');
     if (this.error) throw new Error(this.error);
     return { ok: true };
+  }
+
+  async deviceActive() {
+    const devices = await this.request('GET', '/me/player/devices');
+    if (!devices?.ok) throw new Error('Impossibile verificare il lettore di Spotteck.');
+    return !!devices.data?.devices?.some((d) => d.id === this.deviceId && d.is_active);
   }
 
   stop() {

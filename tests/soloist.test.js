@@ -165,3 +165,31 @@ test('logout deletes Soloist credentials only after the process has exited', asy
     assert.equal(fs.existsSync(cacheDir), false, 'credentials written during shutdown must not survive logout');
   } finally { player.stop(); fs.rmSync(cacheDir, { recursive: true, force: true }); }
 });
+
+test('a Soloist command looks up the device list once', async () => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'soloist-lookup-test-'));
+  const child = new EventEmitter();
+  child.kill = () => {};
+  let active = true;
+  const calls = [];
+  const player = new SoloistPlayer({ binary: process.execPath, cacheDir, installationId: 'test', readKey: () => 'personal-secret',
+    spawnProcess: () => child, sleep: async () => {},
+    request: async (...args) => {
+      calls.push(args);
+      return { ok: true, data: { devices: [{ name: player.name, id: 'soloist-device', is_active: active }] } };
+    } });
+  const lookups = () => calls.filter(([method, endpoint]) => method === 'GET' && endpoint === '/me/player/devices').length;
+  try {
+    await player.start();
+    calls.length = 0;
+    await player.command('PUT', '/me/player/pause');
+    assert.equal(lookups(), 1);
+    assert.ok(!calls.some(([, endpoint]) => endpoint === '/me/player'), 'already active: no transfer');
+    active = false;
+    calls.length = 0;
+    await player.command('PUT', '/me/player/play');
+    assert.equal(lookups(), 1);
+    assert.deepEqual(calls[1].slice(0, 2), ['PUT', '/me/player'], 'inactive: transfer to our receiver first');
+    assert.equal(calls.at(-1)[3].device_id, 'soloist-device');
+  } finally { player.stop(); fs.rmSync(cacheDir, { recursive: true, force: true }); }
+});

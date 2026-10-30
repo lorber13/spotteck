@@ -77,6 +77,7 @@ class SoloistPlayer extends PremiumPlayer {
     if (result && [401, 403, 429].includes(result.status)) throw new Error('Spotify non consente il collegamento. Verifica il login o riprova più tardi.');
     const device = result?.ok && result.data?.devices?.find((d) => d.name === this.name && d.id);
     if (!device) return false;
+    this.device = device;
     this.deviceId = device.id;
     this.eligibility = 'supported';
     return true;
@@ -92,7 +93,15 @@ class SoloistPlayer extends PremiumPlayer {
     }
     if (epoch !== this.generation || !this.child) throw new Error('Avvio annullato.');
     if (!paired) throw new Error(`Apri Spotify e seleziona ${this.name} nel menu Dispositivi per il primo collegamento.`);
+    // refreshDevice() just fetched the device list: reuse it instead of asking again.
+    this.knownActive = !!this.device.is_active;
     return super.command(...args);
+  }
+
+  async deviceActive() {
+    const active = this.knownActive;
+    this.knownActive = undefined;
+    return active ?? super.deviceActive();
   }
 }
 module.exports = { SoloistPlayer };
