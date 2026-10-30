@@ -173,7 +173,8 @@ do {
     let timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
         if getppid() != parent || kill(pid, 0) != 0 { CFRunLoopStop(CFRunLoopGetMain()) }
     }
-    RunLoop.main.run()
+    // RunLoop.run() restarts after CFRunLoopStop and never returns; CFRunLoopRun() returns, so cleanup below runs.
+    CFRunLoopRun()
     timer.invalidate()
     AudioDeviceStop(aggregate, callback)
     if let callback { AudioDeviceDestroyIOProcID(aggregate, callback) }

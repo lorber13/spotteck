@@ -42,3 +42,20 @@ test('audio meter captures only the player, bounds frames and stops on player ch
   assert.equal(child.killed, true);
   meter.stop();
 });
+
+const helper = require('node:path').join(__dirname, '../build/native/audio-meter');
+test('the native helper exits by itself when the target process quits', {
+  skip: process.platform !== 'darwin' || !fs.existsSync(helper) ? 'needs macOS and `npm run build:audio`' : false
+}, async () => {
+  const { spawn } = require('node:child_process');
+  const target = spawn('sleep', ['1']);
+  const meter = spawn(helper, [String(target.pid)], { stdio: ['ignore', 'ignore', 'pipe'] });
+  const exited = new Promise((resolve) => meter.once('exit', resolve));
+  await new Promise((resolve) => target.once('exit', resolve));
+  const timer = setTimeout(() => meter.kill('SIGKILL'), 4000);
+  const code = await exited;
+  clearTimeout(timer);
+  // A SIGKILL from the timer means the watchdog never stopped the run loop.
+  assert.notEqual(meter.signalCode, 'SIGKILL', 'helper kept running after its target exited');
+  assert.equal(typeof code, 'number');
+});
