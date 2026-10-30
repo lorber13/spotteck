@@ -9,9 +9,12 @@ function fitCanvas(canvas) {
   const w = Math.round(r.width);
   const h = Math.round(r.height);
   if (!w || !h) return null;
-  if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
+  // Canvas sizes are integers: compare rounded values, or fractional zoom resizes (and clears) every frame.
+  const pw = Math.round(w * dpr);
+  const ph = Math.round(h * dpr);
+  if (canvas.width !== pw || canvas.height !== ph) {
+    canvas.width = pw;
+    canvas.height = ph;
   }
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -21,8 +24,8 @@ function fitCanvas(canvas) {
 function reuseOffscreen(cacheObj, w, h, dpr) {
   if (!cacheObj.canvas) cacheObj.canvas = document.createElement('canvas');
   const c = cacheObj.canvas;
-  c.width = w * dpr;
-  c.height = h * dpr;
+  c.width = Math.round(w * dpr);
+  c.height = Math.round(h * dpr);
   const ctx = c.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   return { c, ctx };
