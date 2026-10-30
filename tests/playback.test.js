@@ -49,12 +49,19 @@ function controller(product, options = {}) {
       } };
       return require(name);
     },
-    module: { exports: {} }, console, Buffer, URL, URLSearchParams, AbortSignal,
+    module: { exports: {} }, console, Buffer, URL, URLSearchParams,
+    AbortSignal: options.timeouts ? { timeout: () => { const c = new AbortController(); options.timeouts.push(c); return c.signal; } } : AbortSignal,
     Date: options.clock ? class extends Date { static now() { return options.clock.now; } } : Date,
     setInterval: () => 1, clearInterval() {}, setTimeout: () => 1,
     fetch: async (url, opts) => {
       const endpoint = new URL(url).pathname;
-      calls.api.push({ endpoint, opts });
+      calls.api.push({ endpoint, opts, signal: opts.signal });
+      if (opts.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+      if (options.expireOnce === endpoint) {
+        options.expireOnce = null;
+        options.timeouts.forEach((c) => c.abort()); // the refresh took longer than the first request's budget
+        return { status: 401, ok: false, text: async () => '{}' };
+      }
       const meStatus = endpoint === '/v1/me' && options.meStatus?.();
       if (meStatus === 0) throw new Error('offline');
       if (meStatus) return { status: meStatus, ok: false, text: async () => '{}' };
@@ -269,4 +276,20 @@ test('a revoked Spotify login shows as signed out right away', async () => {
   assert.equal((await api.getProfile()).authenticated, false);
   await api.playPause();
   assert.equal(api.snapshot().playbackMode, 'desktop');
+});
+
+test('the retry after a 401 gets its own timeout', async () => {
+  const options = { timeouts: [] };
+  const { api, calls } = controller('free', options);
+  await api.init(null);
+  await new Promise(setImmediate);
+  options.expireOnce = '/v1/me/player/next';
+  calls.api.length = 0;
+  calls.desktop.length = 0;
+  assert.equal((await api.nextTrack()).ok, true);
+  const next = calls.api.filter((call) => call.endpoint === '/v1/me/player/next');
+  assert.equal(next.length, 2);
+  assert.notEqual(next[1].signal, next[0].signal);
+  assert.equal(next[1].signal.aborted, false);
+  assert.ok(!calls.desktop.some((call) => /next track/.test(call.args[1])), 'no AppleScript fallback after a good retry');
 });

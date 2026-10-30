@@ -228,6 +228,7 @@ async function spotifyWebApiRequest(method, endpoint, body = null, queryParams =
       if (epoch !== accountGeneration) return null;
       if (token) {
         options.headers.Authorization = `Bearer ${token}`;
+        options.signal = AbortSignal.timeout(10000); // the refresh may have used up the first budget
         res = await fetch(url, options);
       }
     }
