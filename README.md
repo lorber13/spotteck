@@ -3,7 +3,9 @@
 > 🤖 **Per configurare tutto con un agente AI (Codex, Antigravity, ecc.):** dai questo file e il progetto 👉 [**SETUP_GUIDE.md**](SETUP_GUIDE.md)
 
 Una nuova interfaccia per Spotify più bella, essenziale ed elegante.  
-Elimina il disordine dell'app ufficiale e trasforma l'ascolto in un telecomando compatto con visualizzatori analogici (oscilloscopio, cassetta, VU meter, vinile, fluido Aether).
+Elimina il disordine dell'app ufficiale e trasforma l'ascolto in un lettore compatto con visualizzatori analogici (oscilloscopio, cassetta, VU meter, vinile, fluido Aether).
+
+**Requisiti:** Mac Apple Silicon con macOS 14.2 o successivo e un account **Spotify Premium**. Spotteck suona da solo: non serve l’app Spotify sul Mac.
 
 ---
 

@@ -1,55 +1,49 @@
-# Spotteck 1.1 — installazione e sviluppo
+# Spotteck 2.0 — installazione e sviluppo
 
 ## Requisiti
 
-Mac Apple Silicon con macOS 14.2 o successivo. Spotify Desktop serve per il primo abbinamento Soloist e per gli account Free. Per Premium, dopo l’abbinamento Spotteck può suonare con Spotify chiuso.
+Mac Apple Silicon con macOS 14.2 o successivo e un account **Spotify Premium** (anche Family, Duo o Student). Gli account Free non sono supportati: Spotteck lo segnala nelle Impostazioni.
+
+Spotteck riproduce l’audio da solo, come dispositivo Spotify Connect. Non serve Spotify Desktop, nessun motore esterno, nessuna chiave personale e nessun Client ID.
 
 ## Installare
 
-Apri il DMG e trascina Spotteck in Applicazioni. Dati, playlist e credenziali restano in `~/Library/Application Support/Spotteck`; aggiornare l’app non li cancella. Il pacchetto locale non è notarizzato Apple.
+Apri il DMG e trascina Spotteck in Applicazioni. Il pacchetto locale non è notarizzato Apple: al primo avvio usa clic destro → Apri.
+
+Dati e playlist aggiunte restano in `~/Library/Application Support/com.braun.spotteck`; aggiornare l’app non li cancella. Al primo avvio le playlist aggiunte con Spotteck 1.x vengono importate automaticamente.
 
 ## Account e riproduzione
 
-1. Effettua il login nelle Impostazioni di Spotteck. L’accesso usa PKCE e token cifrati con il Portachiavi; non richiede un Client Secret.
-2. Gli account Free continuano a usare Spotify Desktop.
-3. Per Premium installa Spotify Soloist dal download ufficiale Apple Silicon: https://developer.spotify.com/documentation/soloist/reference/downloads-and-updates . Colloca l’eseguibile `soloist`, con permesso di esecuzione, in `~/Library/Application Support/Spotteck/engines/soloist/soloist`.
-4. Genera la tua chiave personale da https://developer.spotify.com/dashboard/soloist . Incollala nel campo protetto di Spotteck e premi **Salva e collega**. Non pubblicarla né inviarla in chat.
-5. Nel menu Dispositivi di Spotify scegli il nome Spotteck indicato nelle Impostazioni. Spotteck annuncia l’endpoint attraverso Bonjour di macOS e salva l’associazione. Al termine riavvia automaticamente il motore per usare la sessione salvata.
-6. Dopo il collegamento puoi chiudere Spotify. Il volume del motore parte al 100%; lo slider controlla il volume del lettore. L’uscita è sempre quella predefinita di macOS.
+1. Apri le Impostazioni e premi **Accedi**. Il browser mostra la pagina di accesso di Spotify; al termine torna a Spotteck.
+2. L’accesso riutilizzabile è salvato nel Portachiavi di macOS: ai riavvii successivi Spotteck si ricollega da solo.
+3. La griglia mostra le playlist della tua libreria Spotify. Con **+** puoi aggiungere altre playlist incollando il link (Spotify: Condividi → Copia link alla playlist).
+4. Spotteck compare come dispositivo Spotify Connect anche nell’app Spotify del telefono: da lì puoi spostare la riproduzione sul Mac. Se un altro dispositivo sta suonando, Play su Spotteck porta la riproduzione qui.
+5. L’uscita è sempre quella predefinita di macOS. Lo slider controlla il volume di Spotteck. I tasti multimediali e il Centro di controllo funzionano tramite Now Playing di macOS.
 
-Il binario Soloist e le chiavi personali non sono inclusi nei pacchetti né nel repository. Le build Soloist scadono: aggiorna il binario quando richiesto. Non stampare gli argomenti del processo, perché la CLI ufficiale riceve la chiave all’avvio. Spotteck non inoltra né conserva i log del motore: estrae soltanto il numero della porta pubblica ZeroConf per Bonjour.
-
-Logout e cambio account fermano il motore. Il logout cancella le credenziali cifrate e la sessione Soloist locale, ma conserva le playlist personali dell’app.
+**Disconnetti** ferma la riproduzione e cancella l’accesso dal Portachiavi; le playlist aggiunte con + restano.
 
 ## Visualizzatori
 
-Autorizza l’acquisizione dell’audio di sistema quando macOS la richiede. Il programma nativo analizza esclusivamente Soloist o Spotify Desktop: non apre il microfono, non salva registrazioni e non modifica l’uscita audio. Spettro e onda provengono dai campioni reali; i due VU ricevono livelli RMS e picchi stereo separati. In assenza di segnale i visualizzatori restano fermi.
-
-Un mixer come FineTune può intercettare l’audio prima del tap: se senti musica ma Spotteck segnala silenzio, verifica il permesso in Privacy e sicurezza > Registrazione schermo e audio di sistema e la configurazione del mixer. Spotteck non chiude app di terzi.
+Spotteck analizza direttamente l’audio che sta riproducendo. Non chiede permessi di registrazione, non apre il microfono e non salva nulla. Spettro, onda e i due VU (RMS e picchi stereo separati) seguono il segnale reale; in pausa i visualizzatori restano fermi.
 
 ## Sviluppo
 
-Richiede Node.js/npm e Xcode oppure Command Line Tools, con SDK che esponga Core Audio Process Taps.
+Richiede Rust (stable), Node.js/npm e Xcode Command Line Tools.
 
 ```
 npm ci
-npm start
+npm start            # tauri dev
+npm test             # cargo test --workspace + node --test
+npm run check:ui     # prova isolata dell’interfaccia in Chromium (Playwright)
+npm run pack         # Spotteck.app
+npm run dist         # .app + .dmg
 ```
 
-`npm start` compila l’analizzatore per arm64 con deployment target macOS 14.2. Le versioni Electron e builder sono fissate e allineate con il lockfile.
+Il codice Rust è diviso in:
 
-```
-npm test
-npm run build:audio
-build/native/audio-meter --self-test
-npm run pack
-npm run dist
-```
+- `crates/spotteck-core`: stato del lettore, disponibilità, playlist aggiunte, analisi audio. Nessuna dipendenza di sistema: i test girano su qualsiasi piattaforma.
+- `crates/spotteck-spotify`: collegamento a Spotify tramite librespot (accesso, Spotify Connect, libreria, copia dell’audio per i visualizzatori).
+- `src-tauri`: l’app Tauri (finestra, comandi, eventi, Portachiavi, Now Playing).
+- `ui`: l’interfaccia HTML/CSS/JS.
 
-Per la prova isolata dell’interfaccia:
-
-```
-node_modules/electron/dist/Electron.app/Contents/MacOS/Electron tools/check-premium-ui.js
-```
-
-Il bundle include soltanto `src`, metadati del pacchetto e il programma audio nativo compilato. Test, screenshot, backup, sorgenti Swift e chiavi non vengono distribuiti. Le playlist vengono salvate tramite file temporaneo e rinomina; errori e archivi corrotti vengono segnalati senza sovrascrivere il file precedente.
+librespot è una libreria open source non ufficiale: se Spotify cambia il protocollo, può servire aggiornarla.
