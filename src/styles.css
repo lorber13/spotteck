@@ -1021,6 +1021,20 @@ canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%
   border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
+#spotifyClientId {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px;
+  color: var(--text, #f0efea);
+  background: #141413;
+  border: 1px solid #666;
+  border-radius: 4px;
+}
+#spotifyClientId:focus-visible { outline: 2px solid #ff5924; }
+#spotifySetupHint { overflow-wrap: anywhere; }
+#spotifySetup .settings-hint, #spotifyStatus { font-size: 14px; }
+#soloistSetup .settings-hint { font-size: 14px; }
+
 /* Instrument Checklist — Clean recessed well, ZERO orange borders on rows */
 .vis-checklist {
   display: flex;

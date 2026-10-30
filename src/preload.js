@@ -18,20 +18,15 @@ const api = {
   addPlaylistByUrl: (url) => ipcRenderer.invoke('playlists:add-url', url),
   removePlaylist: (id) => ipcRenderer.invoke('playlists:remove', id),
   getProfile: () => ipcRenderer.invoke('spotify:get-profile'),
-  login: () => ipcRenderer.invoke('spotify:login'),
+  login: (clientId) => ipcRenderer.invoke('spotify:login', clientId),
   logout: () => ipcRenderer.invoke('spotify:logout'),
-  reportProgress: (data) => ipcRenderer.send('spotify:report-progress', data),
+  configureSoloist: (key) => ipcRenderer.invoke('soloist:configure', key),
+  connectSoloist: () => ipcRenderer.invoke('soloist:connect'),
+  openSoloistKeyPage: () => ipcRenderer.invoke('soloist:open-key-page'),
+  onAudioStatus: (cb) => ipcRenderer.on('audio:status', (_e, status) => cb(status)),
+  onAudioFrame: (cb) => ipcRenderer.on('audio:frame', (_e, frame) => cb(frame)),
   onState: (cb) => {
     ipcRenderer.on('spotify:state', (_e, st) => cb(st));
-  },
-  onPlayStream: (cb) => {
-    ipcRenderer.on('spotify:play-stream', (_e, payload) => cb(payload));
-  },
-  onTogglePause: (cb) => {
-    ipcRenderer.on('spotify:toggle-pause', (_e, payload) => cb(payload));
-  },
-  onSeekTo: (cb) => {
-    ipcRenderer.on('spotify:seek-to', (_e, payload) => cb(payload));
   }
 };
 

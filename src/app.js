@@ -385,17 +385,14 @@
 
     if (e.key === 'ArrowRight' || e.key === 'MediaTrackNext') {
       e.preventDefault();
-      ensureAudioGraph();
       window.spotteck.next();
       setTimeout(pollSpotify, 180);
     } else if (e.key === 'ArrowLeft' || e.key === 'MediaTrackPrevious') {
       e.preventDefault();
-      ensureAudioGraph();
       window.spotteck.prev();
       setTimeout(pollSpotify, 180);
     } else if (e.key === ' ' || e.key === 'MediaPlayPause') {
       e.preventDefault();
-      ensureAudioGraph();
       window.spotteck.playPause();
       setTimeout(pollSpotify, 180);
     }
@@ -516,6 +513,14 @@
     if (!bridge || !bridge.getProfile) return;
     try {
       const res = await bridge.getProfile();
+      document.getElementById('spotifySetup').hidden = !res?.needsClientId;
+      document.getElementById('spotifyStatus').textContent = res?.error || '';
+      document.getElementById('soloistSetup').hidden = ['free', 'open'].some((plan) => res?.profile?.product?.toLowerCase().startsWith(plan));
+      if (res?.soloist) {
+        document.getElementById('soloistStatus').textContent = !res.soloist.installed ? 'Motore Soloist da installare.' :
+          res.soloist.paired ? 'Lettore associato. Uscita: predefinita di macOS.' :
+          res.soloist.configured ? `Seleziona ${res.soloist.deviceName} nel menu Dispositivi di Spotify per il primo collegamento.` : 'Genera la chiave e incollala nel campo protetto.';
+      }
       if (res && res.authenticated && res.profile) {
         const p = res.profile;
         profileName.textContent = p.name || 'Account Spotify';
@@ -561,10 +566,18 @@
     profileLoginBtn.addEventListener('click', async () => {
       if (!bridge || !bridge.login) return;
       profileLoginBtn.disabled = true;
-      await bridge.login();
-      profileLoginBtn.disabled = false;
-      await refreshProfileUI();
-      await pollSpotify();
+      const status = document.getElementById('spotifyStatus');
+      status.textContent = 'Completa l’accesso nel browser…';
+      try {
+        const result = await bridge.login(document.getElementById('spotifyClientId').value.trim());
+        await refreshProfileUI();
+        if (result?.error) status.textContent = result.error;
+        await pollSpotify();
+      } catch (_) {
+        status.textContent = 'Accesso non riuscito. Riprova.';
+      } finally {
+        profileLoginBtn.disabled = false;
+      }
     });
   }
 
@@ -576,6 +589,27 @@
       await pollSpotify();
     });
   }
+
+  document.getElementById('soloistKeyPage').addEventListener('click', () => bridge.openSoloistKeyPage());
+  document.getElementById('soloistSave').addEventListener('click', async () => {
+    const button = document.getElementById('soloistSave');
+    const field = document.getElementById('soloistKey');
+    const status = document.getElementById('soloistStatus');
+    button.disabled = true;
+    try {
+      if (field.value) {
+        const saving = bridge.configureSoloist(field.value);
+        field.value = '';
+        const saved = await saving;
+        if (saved?.error) { status.textContent = saved.error; return; }
+      }
+      status.textContent = 'Collegamento in corso: al primo utilizzo scegli Spotteck Soloist nel menu Dispositivi di Spotify.';
+      const result = await bridge.connectSoloist();
+      status.textContent = result?.error || (result?.pendingPairing ? `Soloist è avviato. Seleziona ${result.deviceName} nel menu Dispositivi di Spotify. Poi potrai chiudere Spotify.` : 'Lettore collegato. Ora puoi chiudere Spotify.');
+      await pollSpotify();
+    } catch (_) { status.textContent = 'Collegamento non riuscito. Riprova.'; }
+    finally { button.disabled = false; }
+  });
 
   // ====================================================================
   // PLAYLISTS MANAGEMENT
@@ -658,7 +692,6 @@
 
       // Left-click: Play playlist immediately in background
       btn.addEventListener('click', async () => {
-        ensureAudioGraph();
         player.activePlaylistId = p.id;
         updatePlaylistActiveState();
         await window.spotteck.playUri(p.id);
@@ -689,7 +722,11 @@
 
   async function openPlaylistDrawer(p) {
     drawerPlaylist = p;
-    drawerCover.src = p.image || '';
+    drawerCover.hidden = true;
+    drawerCover.onload = () => { drawerCover.hidden = false; };
+    drawerCover.onerror = () => { drawerCover.hidden = true; };
+    if (p.image) drawerCover.src = p.image;
+    else drawerCover.removeAttribute('src');
     drawerCover.classList.toggle('active', isSamePlaylist(player.activePlaylistId, p.id));
     drawerTitle.textContent = p.name || 'Playlist';
     drawerList.innerHTML = '<div class="drawer-msg">Caricamento brani in corso…</div>';
@@ -728,7 +765,6 @@
       row.appendChild(timeEl);
 
       row.addEventListener('click', async () => {
-        ensureAudioGraph();
         player.activePlaylistId = p.id;
         player.trackUri = t.uri;
         updatePlaylistActiveState();
@@ -751,7 +787,6 @@
 
   drawerPlayAll.addEventListener('click', async () => {
     if (!drawerPlaylist) return;
-    ensureAudioGraph();
     player.activePlaylistId = drawerPlaylist.id;
     updatePlaylistActiveState();
     await window.spotteck.playUri(drawerPlaylist.id);
@@ -761,7 +796,8 @@
 
   drawerRemove.addEventListener('click', async () => {
     if (!drawerPlaylist) return;
-    playlists = await window.spotteck.removePlaylist(drawerPlaylist.id);
+    try { playlists = await window.spotteck.removePlaylist(drawerPlaylist.id); }
+    catch (_) { drawerTitle.textContent = 'Rimozione non salvata: riprova.'; return; }
     if (player.activePlaylistId === drawerPlaylist.id) player.activePlaylistId = null;
     drawer.classList.remove('open');
     drawerPlaylist = null;
@@ -779,8 +815,10 @@
     if (!url) return;
     addConfirm.disabled = true;
     addError.textContent = 'Verifica playlist…';
-    const res = await window.spotteck.addPlaylistByUrl(url);
-    addConfirm.disabled = false;
+    let res;
+    try { res = await window.spotteck.addPlaylistByUrl(url); }
+    catch (_) { res = { error: 'Impossibile aggiungere la playlist.' }; }
+    finally { addConfirm.disabled = false; }
     if (!res || !res.success) {
       addError.textContent = (res && res.error) || 'Link non valido';
       return;
@@ -798,17 +836,14 @@
 
   // Transport Controls
   playBtn.addEventListener('click', async () => {
-    ensureAudioGraph();
     await window.spotteck.playPause();
     setTimeout(pollSpotify, 180);
   });
   prevBtn.addEventListener('click', async () => {
-    ensureAudioGraph();
     await window.spotteck.prev();
     setTimeout(pollSpotify, 220);
   });
   nextBtn.addEventListener('click', async () => {
-    ensureAudioGraph();
     await window.spotteck.next();
     setTimeout(pollSpotify, 220);
   });
@@ -852,7 +887,8 @@
     if (player.artwork && player.artwork !== currentArtworkUrl) {
       currentArtworkUrl = player.artwork;
       bgArtwork.classList.remove('ready');
-      bgArtwork.onload = () => bgArtwork.classList.add('ready');
+      bgArtwork.onload = () => { bgArtwork.hidden = false; bgArtwork.classList.add('ready'); };
+      bgArtwork.onerror = () => { bgArtwork.hidden = true; };
       bgArtwork.src = player.artwork;
       coverImage.src = player.artwork;
     }
@@ -879,19 +915,15 @@
       try { navigator.mediaSession.setActionHandler(action, fn); } catch (_e) {}
     };
     bindMedia('play', () => {
-      ensureAudioGraph();
       window.spotteck.playPause();
     });
     bindMedia('pause', () => {
-      ensureAudioGraph();
       window.spotteck.playPause();
     });
     bindMedia('previoustrack', () => {
-      ensureAudioGraph();
       window.spotteck.prev();
     });
     bindMedia('nexttrack', () => {
-      ensureAudioGraph();
       window.spotteck.next();
     });
     bindMedia('seekto', (details) => {
@@ -904,87 +936,65 @@
   // ====================================================================
   // STANDALONE INTERNAL AUDIO ENGINE & WEBAUDIO ANALYSER
   // ====================================================================
-  const audioEl = new Audio();
-  audioEl.crossOrigin = 'anonymous';
-  audioEl.preload = 'auto';
 
   // Volume ALWAYS defaults to 100% (maximum) on startup as requested
-  audioEl.volume = 1.0;
   player.volume = 100;
   try { localStorage.setItem('spotteck_volume', '100'); } catch (_e) {}
+  let pendingVolume = null;
+  let volumeSending = false;
+  let volumeTimer;
+  let volumeSyncAfter = 0;
+  async function sendVolume() {
+    clearTimeout(volumeTimer);
+    if (volumeSending || pendingVolume === null) return;
+    const value = pendingVolume;
+    pendingVolume = null;
+    volumeSending = true;
+    try {
+      const result = await bridge.setVolume(value);
+      if (result?.error) throw new Error(result.error);
+    } catch (error) {
+      document.getElementById('spotifyStatus').textContent = error.message;
+      settingsModal.classList.add('open');
+    } finally {
+      volumeSending = false;
+      volumeSyncAfter = Date.now() + 1500;
+      if (pendingVolume !== null) sendVolume();
+    }
+  }
   if (volumeSlider) {
     volumeSlider.value = '100';
     volumeSlider.addEventListener('input', () => {
       const v = Math.min(100, Math.max(0, Number(volumeSlider.value) || 0));
       player.volume = v;
-      audioEl.volume = v / 100;
-      if (bridge && bridge.setVolume) bridge.setVolume(v);
+      if (bridge?.setVolume) {
+        pendingVolume = v;
+        clearTimeout(volumeTimer);
+        volumeTimer = setTimeout(sendVolume, 120);
+      }
       try { localStorage.setItem('spotteck_volume', String(v)); } catch (_e) {}
     });
+    volumeSlider.addEventListener('change', sendVolume);
   }
 
-  let audioCtx = null;
-  let analyser = null;
   let freqData = new Uint8Array(256);
   let timeData = new Uint8Array(512);
-
-  function ensureAudioGraph() {
-    if (audioCtx) {
-      if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
-      return;
-    }
-    try {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      audioCtx = new Ctx();
-      analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.58;
-      freqData = new Uint8Array(analyser.frequencyBinCount);
-      timeData = new Uint8Array(analyser.fftSize);
-
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
-          const micSource = audioCtx.createMediaStreamSource(stream);
-          micSource.connect(analyser);
-        }).catch(() => {});
-      }
-    } catch (e) {
-      console.error('AudioContext init error:', e);
-    }
-  }
-
-  window.addEventListener('pointerdown', () => ensureAudioGraph(), { passive: true });
-
-  audioEl.addEventListener('playing', () => {
-    ensureAudioGraph();
-    player.isPlaying = true;
-    updateTransportUI();
+  bridge?.onAudioStatus?.((status) => {
+    document.getElementById('audioAnalysisStatus').textContent = status;
   });
-
-  audioEl.addEventListener('timeupdate', () => {
-    if (!Number.isNaN(audioEl.currentTime)) {
-      player.position = audioEl.currentTime;
-      player.lastPollAt = performance.now();
-    }
-    if (audioEl.duration && !Number.isNaN(audioEl.duration) && Number.isFinite(audioEl.duration)) {
-      player.duration = audioEl.duration;
-    }
-    if (bridge && bridge.reportProgress) {
-      bridge.reportProgress({
-        position: player.position,
-        duration: player.duration,
-        isPlaying: !audioEl.paused
-      });
-    }
-  });
-
-  audioEl.addEventListener('ended', () => {
-    if (bridge && bridge.next) {
-      bridge.next();
-    }
+  let nativeAudio = null;
+  let nativeAudioAt = -Infinity;
+  bridge?.onAudioFrame?.((frame) => {
+    nativeAudio = frame;
+    nativeAudioAt = performance.now();
   });
 
   function applyPlayerState(st) {
+    const status = document.getElementById('spotifyStatus');
+    if (st?.playbackError && status.textContent !== st.playbackError) {
+      status.textContent = st.playbackError;
+      settingsModal.classList.add('open');
+    }
     if (st && st.isRunning) {
       player.isRunning = true;
       player.isPlaying = !!st.isPlaying;
@@ -1000,7 +1010,8 @@
       }
       player.shuffling = !!st.shuffling;
       player.artwork = st.artwork || '';
-      if (typeof st.volume === 'number' && (!player.volume || player.volume === 100)) {
+      if (Number.isFinite(st.volume) && pendingVolume === null && !volumeSending &&
+          !volumeSlider?.matches(':active') && Date.now() >= volumeSyncAfter) {
         player.volume = st.volume;
         if (volumeSlider) volumeSlider.value = String(st.volume);
       }
@@ -1036,43 +1047,6 @@
     if (bridge.onState) {
       bridge.onState((st) => applyPlayerState(st));
     }
-    if (bridge.onPlayStream) {
-      bridge.onPlayStream(({ streamUrl, trackUri, duration }) => {
-        ensureAudioGraph();
-        if (duration) player.duration = duration;
-        if (trackUri) player.trackUri = trackUri;
-        player.position = 0;
-        player.lastPollAt = performance.now();
-        player.isPlaying = true;
-        audioEl.src = streamUrl;
-        audioEl.play().catch((err) => console.warn('Audio play error:', err));
-        updateTransportUI();
-        syncDrawerTrackSelection(true);
-      });
-    }
-    if (bridge.onTogglePause) {
-      bridge.onTogglePause(({ isPlaying }) => {
-        ensureAudioGraph();
-        player.isPlaying = !!isPlaying;
-        if (player.isPlaying) {
-          audioEl.play().catch(() => {});
-        } else {
-          audioEl.pause();
-        }
-        updateTransportUI();
-      });
-    }
-    if (bridge.onSeekTo) {
-      bridge.onSeekTo(({ seconds }) => {
-        if (typeof seconds === 'number' && !Number.isNaN(seconds)) {
-          try {
-            audioEl.currentTime = seconds;
-            player.position = seconds;
-            player.lastPollAt = performance.now();
-          } catch (_e) {}
-        }
-      });
-    }
   }
 
   // Initial Load — render "+" button immediately, then populate saved playlists
@@ -1085,10 +1059,10 @@
         renderPlaylists();
       }
     } catch (e) {
-      console.error('Failed to load playlists:', e);
+      addError.textContent = e.message || 'Archivio playlist non disponibile.';
+      addModal.classList.add('open');
     }
     await pollSpotify();
-    setInterval(pollSpotify, 1000);
   })();
 
   // ====================================================================
@@ -1155,48 +1129,12 @@
 
     const wave = new Float32Array(TRACE_POINTS);
 
-    let hasRealAudio = false;
-    if (analyser && freqData) {
-      analyser.getByteFrequencyData(freqData);
-      if (timeData) analyser.getByteTimeDomainData(timeData);
-      for (let i = 0; i < 24; i++) {
-        if (freqData[i] > 12) { hasRealAudio = true; break; }
-      }
-    }
-
-    if (!hasRealAudio && freqData) {
-      // High-craft procedural acoustic telemetry synced with Spotify playback
-      const bpm = 124;
-      const beatSec = 60 / bpm;
-      const beatFrac = (curPos / beatSec) % 1.0;
-      const kickTrans = Math.pow(Math.max(0, 1.0 - beatFrac * 4.2), 2.4);
-      const isBackbeat = (Math.floor(curPos / beatSec) % 2) === 1;
-      const snareTrans = isBackbeat ? Math.pow(Math.max(0, 1.0 - beatFrac * 4.8), 2.2) : 0;
-      const eighthFrac = (curPos / (beatSec / 2)) % 1.0;
-      const hatTrans = Math.pow(Math.max(0, 1.0 - eighthFrac * 5.0), 1.8);
-      const volScale = (typeof player.volume === 'number' ? player.volume : 100) / 100;
-
-      for (let i = 1; i <= 10; i++) {
-        const base = 75 + 35 * Math.sin(nowSec * 3.2 + i * 0.5);
-        freqData[i] = Math.min(255, Math.floor((base + kickTrans * 155) * volScale));
-      }
-      for (let i = 11; i <= 54; i++) {
-        const base = 60 + 30 * Math.sin(nowSec * 5.6 + i * 0.3);
-        freqData[i] = Math.min(255, Math.floor((base + snareTrans * 130 + kickTrans * 40) * volScale));
-      }
-      for (let i = 55; i <= 140; i++) {
-        const base = 40 + 25 * Math.sin(nowSec * 9.8 + i * 0.2);
-        freqData[i] = Math.min(255, Math.floor((base + hatTrans * 110) * volScale));
-      }
-
-      if (timeData) {
-        for (let i = 0; i < timeData.length; i++) {
-          const fund = Math.sin(i * 0.085 + nowSec * 16.0) * (0.55 + 0.45 * kickTrans);
-          const harm = Math.sin(i * 0.19 - nowSec * 24.0) * (0.30 + 0.35 * snareTrans);
-          const s = (fund + harm) * volScale;
-          timeData[i] = Math.min(255, Math.max(0, 128 + Math.floor(s * 75)));
-        }
-      }
+    if (performance.now() - nativeAudioAt < 250) {
+      freqData.set(nativeAudio.frequency);
+      timeData.set(nativeAudio.time);
+    } else {
+      freqData.fill(0);
+      timeData.fill(128);
     }
 
     if (freqData) {
@@ -1268,16 +1206,14 @@
         bands16[b] += (val - bands16[b]) * 0.18;
       }
 
-      // Smooth phase-coherent analog oscilloscope wave driven by real FFT energy (kept untouched)
-      const prevWave = scopeHistory[scopeHistory.length - 1] || flatTrace;
+      // Smooth measured samples spatially and across frames, keeping the real waveform.
+      const previousWave = scopeHistory[scopeHistory.length - 1] || flatTrace;
       for (let i = 0; i < TRACE_POINTS; i++) {
-        const x = i / (TRACE_POINTS - 1);
-        const windowEnv = Math.sin(x * Math.PI);
-        const f1 = Math.sin(x * Math.PI * 4 + nowSec * 7.2) * smoothBass * 0.50;
-        const f2 = Math.sin(x * Math.PI * 10 - nowSec * 11.8) * smoothMid * 0.28;
-        const f3 = Math.sin(x * Math.PI * 22 + nowSec * 21.0) * smoothHigh * 0.14;
-        const targetVal = (f1 + f2 + f3) * windowEnv;
-        wave[i] = prevWave[i] * 0.45 + targetVal * 0.55;
+        const sample = Math.floor(i * (timeData.length - 1) / (TRACE_POINTS - 1));
+        const left = timeData[Math.max(0, sample - 1)];
+        const right = timeData[Math.min(timeData.length - 1, sample + 1)];
+        const measured = ((left + timeData[sample] * 2 + right) / 4 - 128) / 128;
+        wave[i] = previousWave[i] * 0.65 + measured * 0.35;
       }
 
       // True Time-Domain RMS + Beat Flux for lively, musical Dual VU Meters
@@ -1285,23 +1221,11 @@
       let tdSumR = 0;
       let tdPeakL = 0;
       let tdPeakR = 0;
-      if (timeData) {
-        const half = timeData.length >> 1;
-        for (let i = 0; i < half; i++) {
-          const sL = (timeData[i] - 128) / 128;
-          const sR = (timeData[i + half] - 128) / 128;
-          tdSumL += sL * sL;
-          tdSumR += sR * sR;
-          const aL = Math.abs(sL);
-          const aR = Math.abs(sR);
-          if (aL > tdPeakL) tdPeakL = aL;
-          if (aR > tdPeakR) tdPeakR = aR;
-        }
-        tdSumL = Math.sqrt(tdSumL / half);
-        tdSumR = Math.sqrt(tdSumR / half);
+      if (performance.now() - nativeAudioAt < 250 && nativeAudio?.levels) {
+        [tdSumL, tdSumR] = nativeAudio.levels.rms;
+        [tdPeakL, tdPeakR] = nativeAudio.levels.peak;
       }
 
-      // Combine real time-domain amplitude with expanded kick/snare beat transients
       const dynL = Math.pow(tdSumL * 1.65, 1.35) * 0.42 + beatPulseBass * 0.48 + beatPulseMid * 0.18 + tdPeakL * 0.16;
       const dynR = Math.pow(tdSumR * 1.65, 1.35) * 0.42 + beatPulseMid * 0.46 + beatPulseBass * 0.22 + tdPeakR * 0.16;
 

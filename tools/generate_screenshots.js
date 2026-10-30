@@ -69,7 +69,6 @@ ipcMain.handle('spotify:play-uri', () => ({ ok: true }));
 ipcMain.handle('spotify:play-track-in-context', () => ({ ok: true }));
 ipcMain.handle('spotify:login', () => ({ ok: true }));
 ipcMain.handle('spotify:logout', () => ({ ok: true }));
-ipcMain.on('spotify:report-progress', () => {});
 
 async function run() {
   await app.whenReady();

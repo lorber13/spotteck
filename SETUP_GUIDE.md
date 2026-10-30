@@ -1,160 +1,55 @@
-# Spotteck — Guida & Blueprint Tecnico
-> 👤 **Parte 1:** Guida per l'utente  
-> 🤖 **Parte 2:** Specifiche tecniche per agenti AI  
+# Spotteck 1.1 — installazione e sviluppo
 
----
+## Requisiti
 
-# 👤 PARTE 1: GUIDA UTENTE
+Mac Apple Silicon con macOS 14.2 o successivo. Spotify Desktop serve per il primo abbinamento Soloist e per gli account Free. Per Premium, dopo l’abbinamento Spotteck può suonare con Spotify chiuso.
 
-### Cos'è Spotteck?
-Una nuova interfaccia per Spotify più bella, essenziale ed elegante.  
-Elimina le distrazioni dell'app ufficiale e racchiude Spotify in un telecomando compatto con visualizzatori analogici (oscilloscopio, cassetta, VU meter, vinile, fluido Aether).
+## Installare
 
----
+Apri il DMG e trascina Spotteck in Applicazioni. Dati, playlist e credenziali restano in `~/Library/Application Support/Spotteck`; aggiornare l’app non li cancella. Il pacchetto locale non è notarizzato Apple.
 
-## 🚀 Installazione
+## Account e riproduzione
 
-### Tramite DMG (consigliato)
-1. Scarica e apri il file `.dmg` dalla cartella `dist/` o dalle Release.
-2. Trascina **Spotteck** nella cartella **Applicazioni**.
-3. Avvia Spotteck.
+1. Effettua il login nelle Impostazioni di Spotteck. L’accesso usa PKCE e token cifrati con il Portachiavi; non richiede un Client Secret.
+2. Gli account Free continuano a usare Spotify Desktop.
+3. Per Premium installa Spotify Soloist dal download ufficiale Apple Silicon: https://developer.spotify.com/documentation/soloist/reference/downloads-and-updates . Colloca l’eseguibile `soloist`, con permesso di esecuzione, in `~/Library/Application Support/Spotteck/engines/soloist/soloist`.
+4. Genera la tua chiave personale da https://developer.spotify.com/dashboard/soloist . Incollala nel campo protetto di Spotteck e premi **Salva e collega**. Non pubblicarla né inviarla in chat.
+5. Nel menu Dispositivi di Spotify scegli il nome Spotteck indicato nelle Impostazioni. Spotteck annuncia l’endpoint attraverso Bonjour di macOS e salva l’associazione. Al termine riavvia automaticamente il motore per usare la sessione salvata.
+6. Dopo il collegamento puoi chiudere Spotify. Il volume del motore parte al 100%; lo slider controlla il volume del lettore. L’uscita è sempre quella predefinita di macOS.
 
-### Da terminale
-```bash
-npm install
+Il binario Soloist e le chiavi personali non sono inclusi nei pacchetti né nel repository. Le build Soloist scadono: aggiorna il binario quando richiesto. Non stampare gli argomenti del processo, perché la CLI ufficiale riceve la chiave all’avvio. Spotteck non inoltra né conserva i log del motore: estrae soltanto il numero della porta pubblica ZeroConf per Bonjour.
+
+Logout e cambio account fermano il motore. Il logout cancella le credenziali cifrate e la sessione Soloist locale, ma conserva le playlist personali dell’app.
+
+## Visualizzatori
+
+Autorizza l’acquisizione dell’audio di sistema quando macOS la richiede. Il programma nativo analizza esclusivamente Soloist o Spotify Desktop: non apre il microfono, non salva registrazioni e non modifica l’uscita audio. Spettro e onda provengono dai campioni reali; i due VU ricevono livelli RMS e picchi stereo separati. In assenza di segnale i visualizzatori restano fermi.
+
+Un mixer come FineTune può intercettare l’audio prima del tap: se senti musica ma Spotteck segnala silenzio, verifica il permesso in Privacy e sicurezza > Registrazione schermo e audio di sistema e la configurazione del mixer. Spotteck non chiude app di terzi.
+
+## Sviluppo
+
+Richiede Node.js/npm e Xcode oppure Command Line Tools, con SDK che esponga Core Audio Process Taps.
+
+```
+npm ci
 npm start
 ```
 
----
-
-## 🎵 Come funziona con Spotify
-1. Spotify deve essere aperto sul Mac (anche ridotto a icona o nascosto).
-2. Spotteck controlla la riproduzione in background: Spotify non si apre a schermo intero e non ruba il focus.
-
----
-
-## 🕹️ Comandi
-
-| Azione | Comando |
-| :--- | :--- |
-| **Riprodurre una playlist** | Clic sinistro sulla copertina (contorno arancione attivo). |
-| **Scegliere i brani** | Clic destro sulla playlist per aprire la lista. |
-| **Cambiare brano** | Frecce tastiera (`←` / `→`) o frecce a schermo. |
-| **Play / Pausa** | Barra spaziatrice o tasto centrale. |
-| **Regolare il volume** | Slider in basso a destra. |
-| **Cambiare visualizzatore** | Clic sul quadrante circolare. |
-| **Aggiungere playlist** | Tasto `+` in basso a destra (incolla link Spotify). |
-
----
-
-## ⚠️ Domande frequenti
-
-* **La musica non parte:** apri l'app Spotify ed effettua l'accesso.
-* **Richiesta permessi macOS ("Spotteck vorrebbe controllare Spotify"):** premi **OK**.
-
----
----
-
-# 🤖 PARTE 2: SPECIFICHE TECNICHE PER AGENTI AI
+`npm start` compila l’analizzatore per arm64 con deployment target macOS 14.2. Le versioni Electron e builder sono fissate e allineate con il lockfile.
 
 ```
-+-------------------------------------------------------------------------+
-|                  SPOTTECK KNOWLEDGE GRAPH & ARCHITECTURE                |
-+-------------------------------------------------------------------------+
-| [Electron Main (main.js)]                                               |
-|    |-- Lifecycle & Bounds Persist (window-bounds.json)                  |
-|    |-- Global Media Shortcuts (F7, F8, F9 via globalShortcut)           |
-|    |-- PlaylistsStore (playlists-store.js) <-> playlists.json           |
-|    +-- SpotifyController (spotify-controller.js)                        |
-|           |-- Tier 1: Spotify Connect Web API (PUT /v1/me/player/play)  |
-|           |-- Tier 2: macOS AppleScript (osascript -e) [Fallback]       |
-|           +-- Window Suppression Engine (AXFullScreen: false, hide)     |
-|                                                                         |
-| [IPC ContextBridge (preload.js)]                                        |
-|    +-- window.spotteck (Sandboxed, 0 Node internals exposed)            |
-|                                                                         |
-| [Electron Renderer (app.js + visualizers.js)]                           |
-|    |-- Audio Telemetry Loop (requestAnimationFrame)                     |
-|    |-- Selective Canvas Rendering (Only active instrument is painted)   |
-|    |-- Reactive Playlist Active State (Border #FF5924 + Drawer Sync)    |
-|    +-- Minimal Industrial Design (styles.css)                           |
-+-------------------------------------------------------------------------+
-```
-
----
-
-## 1. Regole di Progetto
-
-1. **DIVIETO ASSOLUTO DEL VIOLA (NO PURPLE/VIOLET):**
-   * Vietata qualsiasi tonalità viola, indaco, porpora o magenta (`#8...`, `#9...`, `#A...`, `rgb(128, 0, 128)`, ecc.).
-   * Palette ammessa: nero grafite (`#141413`), metallo scuro (`#1C1B1A`), bianco latte (`#F0EFEA`), grigio e arancione (`#FF5924`, `#FF6B3D`) per accenti e selezione.
-2. **MINIMALISMO & ANTI-OVERENGINEERING:**
-   * Nessun framework front-end: solo Vanilla JavaScript leggero.
-   * Nessuna ridondanza nel codice o nei testi.
-3. **SICUREZZA ELECTRON:**
-   * `contextIsolation: true`, `nodeIntegration: false`.
-   * Nessun accesso diretto a Node nel renderer.
-
----
-
-## 2. Struttura dei File
-
-```
-src/
-├── main.js               # Entry point Electron, finestre, scorciatoie globali
-├── preload.js            # ContextBridge sicuro (window.spotteck)
-├── spotify-controller.js # Controller riproduzione ibrido (Connect + AppleScript)
-├── playlists-store.js    # Store locale playlist e parser metadati
-├── visualizers.js        # Motore canvas per tutti gli strumenti
-├── app.js                # Controller UI, loop telemetria audio, eventi
-├── index.html            # Struttura del layout
-└── styles.css            # Stili e design tokens
-```
-
----
-
-## 3. Backend Audio (`spotify-controller.js`)
-
-Architettura a due livelli per impedire l'apertura a schermo intero di Spotify:
-
-1. **Livello 1: Spotify Connect (Web API):**
-   * Endpoint Play: `PUT https://api.spotify.com/v1/me/player/play`
-   * Il comando passa via rete: la finestra di Spotify non si apre e non cambia Space.
-   * Rinnovo automatico dell'access token prima della scadenza.
-2. **Livello 2: AppleScript (Fallback):**
-   * In caso di offline, usa AppleScript con soppressione finestra:
-   ```applescript
-   tell application "Spotify" to play track myUri in context myContext
-   tell application "System Events"
-     try
-       tell process "Spotify" to set value of attribute "AXFullScreen" of window 1 to false
-       set visible of (every process whose bundle identifier is "com.spotify.client") to false
-     end try
-   end tell
-   ```
-
----
-
-## 4. Frontend & Render Loop (`app.js` & `visualizers.js`)
-
-1. **Disegno selettivo:** viene ridisegnato solo lo strumento attivo (`scope`, `cassette`, `vu`, `vinyl`, `aetherBlob`).
-2. **Sincronizzazione drawer:** la traccia in riproduzione riceve `.track-row.current` e invoca `scrollIntoView`.
-3. **Stato playlist attiva:** la playlist corrente ha `.tile.active` (`border-color: #FF5924`).
-
----
-
-## 5. Comandi di Build
-
-```bash
-# Validazione sintattica
-node -c src/main.js && node -c src/preload.js && node -c src/spotify-controller.js && node -c src/playlists-store.js && node -c src/visualizers.js && node -c src/app.js
-
-# Avvio locale
-npm start
-
-# Compilazione pacchetto .app
+npm test
+npm run build:audio
+build/native/audio-meter --self-test
 npm run pack
-
-# Creazione installer .dmg
 npm run dist
 ```
+
+Per la prova isolata dell’interfaccia:
+
+```
+node_modules/electron/dist/Electron.app/Contents/MacOS/Electron tools/check-premium-ui.js
+```
+
+Il bundle include soltanto `src`, metadati del pacchetto e il programma audio nativo compilato. Test, screenshot, backup, sorgenti Swift e chiavi non vengono distribuiti. Le playlist vengono salvate tramite file temporaneo e rinomina; errori e archivi corrotti vengono segnalati senza sovrascrivere il file precedente.

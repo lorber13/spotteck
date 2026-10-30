@@ -22,7 +22,7 @@
 
     <!-- LEFT BAY: instrument + transport -->
     <section class="left-bay">
-      <img id="bgArtwork" class="bg-artwork" alt="">
+      <img id="bgArtwork" class="bg-artwork" alt="" hidden>
       <div class="bg-vignette"></div>
 
       <!-- 7. Aether-Morph High Aura (Full-Screen / Full-Bleed outside circle) -->
@@ -160,7 +160,7 @@
         <!-- Playlist detail (right-click) -->
         <div id="drawer" class="drawer">
           <div class="drawer-head">
-            <img id="drawerCover" class="drawer-cover" alt="">
+            <img id="drawerCover" class="drawer-cover" alt="" hidden>
             <div class="drawer-title-wrap">
               <div id="drawerTitle" class="drawer-title"></div>
               <button id="drawerPlayAll" class="drawer-link">Riproduci tutta</button>
@@ -241,6 +241,23 @@
             <div class="profile-actions">
               <button id="profileLoginBtn" class="key key-orange key-wide">Cambia Account</button>
               <button id="profileLogoutBtn" class="key key-wide">Disconnetti</button>
+            </div>
+            <div id="spotifySetup" hidden>
+              <label class="settings-hint" for="spotifyClientId">Client ID dell’app Spotify Developers</label>
+              <input id="spotifyClientId" type="text" maxlength="32" autocomplete="off" spellcheck="false" aria-describedby="spotifySetupHint">
+              <p id="spotifySetupHint" class="settings-hint">Configurazione iniziale: registra http://127.0.0.1:43821/callback come Redirect URI. Non serve il Client Secret.</p>
+            </div>
+            <p id="spotifyStatus" class="settings-hint" role="status" aria-live="polite"></p>
+            <div id="soloistSetup">
+              <label class="settings-hint" for="soloistKey">Chiave personale Spotify Soloist</label>
+              <input id="soloistKey" class="modal-input" type="password" autocomplete="off" maxlength="2048" placeholder="Incolla qui la tua chiave" aria-describedby="soloistHint">
+              <div class="profile-actions">
+                <button id="soloistKeyPage" class="key key-wide">Genera chiave</button>
+                <button id="soloistSave" class="key key-orange key-wide">Salva e collega</button>
+              </div>
+              <p id="soloistHint" class="settings-hint">La chiave resta cifrata su questo Mac. Al primo avvio seleziona il dispositivo Spotteck Soloist in Spotify; poi potrai chiudere Spotify.</p>
+              <p id="soloistStatus" class="settings-hint" role="status" aria-live="polite"></p>
+          <p id="audioAnalysisStatus" role="status" style="font-size:14px">Visualizzatori: in attesa dell’audio reale.</p>
             </div>
           </div>
         </div>

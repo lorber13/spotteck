@@ -8,30 +8,10 @@ const userDataPath = (app && typeof app.getPath === 'function')
   : path.join(require('os').homedir(), 'Library/Application Support/Spotteck');
 const userConfigDir = path.join(userDataPath, 'user-data');
 const playlistsFile = path.join(userConfigDir, 'playlists.json');
-const metaCacheFile = path.join(userConfigDir, 'tracks-meta-cache.json');
 
 const keepAliveAgent = new https.Agent({ keepAlive: true, maxSockets: 24 });
 const playlistCache = new Map(); // playlistId -> { at, tracks }
 const CACHE_MS = 15 * 60 * 1000;
-const BASE62 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
-
-// Persistent disk cache of track URI -> { title, artist, duration }
-let diskTrackMeta = {};
-try {
-  if (fs.existsSync(metaCacheFile)) {
-    diskTrackMeta = JSON.parse(fs.readFileSync(metaCacheFile, 'utf8')) || {};
-  }
-} catch (_e) {
-  diskTrackMeta = {};
-}
-
-function saveDiskTrackMeta() {
-  try {
-    fs.mkdirSync(userConfigDir, { recursive: true });
-    fs.writeFileSync(metaCacheFile, JSON.stringify(diskTrackMeta), 'utf8');
-  } catch (_e) {}
-}
-
 function playlistIdOf(input) {
   if (!input) return null;
   const s = String(input).trim();
@@ -41,22 +21,9 @@ function playlistIdOf(input) {
   return null;
 }
 
-// Converts a spotify:track:<base62> URI into a 32-char hex GID for spclient metadata v4.
-function trackUriToGid(uri) {
-  const id = String(uri || '').split(':').pop();
-  if (!id) return null;
-  let n = 0n;
-  for (const ch of id) {
-    const idx = BASE62.indexOf(ch);
-    if (idx < 0) return null;
-    n = n * 62n + BigInt(idx);
-  }
-  return n.toString(16).padStart(32, '0');
-}
-
 function get(url, headers = {}) {
   return new Promise((resolve, reject) => {
-    https.get(
+    const request = https.get(
       url,
       {
         agent: keepAliveAgent,
@@ -69,10 +36,17 @@ function get(url, headers = {}) {
         }
         let data = '';
         res.setEncoding('utf8');
-        res.on('data', (c) => { data += c; });
+        res.on('error', reject);
+        res.on('data', (c) => {
+          data += c;
+          if (data.length > 8 * 1024 * 1024) request.destroy(new Error('Risposta troppo grande'));
+        });
         res.on('end', () => resolve(data));
       }
     ).on('error', reject);
+    request.setTimeout(10000, () => request.destroy(new Error('Tempo di risposta scaduto')));
+    const deadline = setTimeout(() => request.destroy(new Error('Tempo di risposta scaduto')), 15000);
+    request.on('close', () => clearTimeout(deadline));
   });
 }
 
@@ -129,37 +103,39 @@ async function fetchPlaylistTracks(input) {
 }
 
 function getPlaylists() {
+  if (!fs.existsSync(playlistsFile)) return [];
   try {
-    if (fs.existsSync(playlistsFile)) {
-      const data = JSON.parse(fs.readFileSync(playlistsFile, 'utf8'));
-      if (Array.isArray(data)) return data;
-    }
-  } catch (e) {
-    console.error('Error reading playlists:', e);
+    const data = JSON.parse(fs.readFileSync(playlistsFile, 'utf8'));
+    if (!Array.isArray(data)) throw new Error('Formato non valido');
+    return data;
+  } catch (_) {
+    throw new Error('Archivio playlist danneggiato: il file è stato conservato. Ripristina una copia prima di modificarlo.');
   }
-  return [];
 }
 
 function savePlaylists(playlists) {
+  fs.mkdirSync(userConfigDir, { recursive: true });
+  const temporary = playlistsFile + '.tmp';
   try {
-    fs.mkdirSync(userConfigDir, { recursive: true });
-    fs.writeFileSync(playlistsFile, JSON.stringify(playlists, null, 2), 'utf8');
-    return true;
-  } catch (e) {
-    console.error('Error saving playlists:', e);
-    return false;
+    fs.writeFileSync(temporary, JSON.stringify(playlists, null, 2), { mode: 0o600 });
+    fs.renameSync(temporary, playlistsFile);
+  } catch (_) {
+    try { fs.rmSync(temporary, { force: true }); } catch (_) {}
+    throw new Error('Impossibile salvare le playlist. Il file precedente è stato conservato.');
   }
 }
 
 async function addPlaylistByUrl(url) {
   const meta = await fetchPlaylistMetadata(url);
   if (!meta) return { success: false, error: 'Link playlist Spotify non valido o non raggiungibile' };
+  try {
   const current = getPlaylists();
   const i = current.findIndex((p) => playlistIdOf(p.id) === playlistIdOf(meta.id));
   if (i >= 0) current[i] = { ...current[i], ...meta };
   else current.push(meta);
   savePlaylists(current);
   return { success: true, playlist: meta, all: current };
+  } catch (error) { return { success: false, error: error.message }; }
 }
 
 function removePlaylist(id) {
@@ -168,4 +144,9 @@ function removePlaylist(id) {
   return current;
 }
 
-module.exports = { getPlaylists, savePlaylists, addPlaylistByUrl, removePlaylist, fetchPlaylistTracks };
+function cachedPlaylistTracks(input) {
+  const cached = playlistCache.get(playlistIdOf(input));
+  return { tracks: cached && Date.now() - cached.at < CACHE_MS ? cached.tracks : [] };
+}
+
+module.exports = { cachedPlaylistTracks, getPlaylists, savePlaylists, addPlaylistByUrl, removePlaylist, fetchPlaylistTracks };

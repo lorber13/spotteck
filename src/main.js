@@ -1,8 +1,10 @@
-const { app, BrowserWindow, ipcMain, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const SpotifyController = require('./spotify-controller');
 const PlaylistsStore = require('./playlists-store');
+const { AudioMeter } = require('./audio-meter');
+let audioMeter;
 
 // Allow WebAudio AudioContext, <audio>.play(), and macOS Hardware Media Keys (F7/F8/F9 & Now Playing)
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -68,6 +70,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
+  audioMeter = new AudioMeter(app, mainWindow, () => SpotifyController.audioProcessId());
   SpotifyController.init(mainWindow).catch((err) => console.error('Spotify standalone init failed:', err));
 
   // Register global hardware media keys (F7 / F8 / F9 on Mac keyboards)
@@ -89,6 +92,7 @@ app.whenReady().then(() => {
 });
 
 app.on('will-quit', () => {
+  audioMeter?.stop();
   try { globalShortcut.unregisterAll(); } catch (_e) {}
   SpotifyController.restoreWindowOnExit().catch(() => {});
 });
@@ -104,9 +108,11 @@ ipcMain.handle('spotify:set-volume', (_e, vol) => SpotifyController.setVolume(vo
 ipcMain.handle('spotify:play-uri', (_e, uri) => SpotifyController.playUri(uri));
 ipcMain.handle('spotify:play-track-in-context', (_e, track, ctx) => SpotifyController.playTrackInContext(track, ctx));
 ipcMain.handle('spotify:get-profile', () => SpotifyController.getProfile());
-ipcMain.handle('spotify:login', () => SpotifyController.login());
+ipcMain.handle('spotify:login', (_e, clientId) => SpotifyController.login(clientId));
 ipcMain.handle('spotify:logout', () => SpotifyController.logout());
-ipcMain.on('spotify:report-progress', (_e, data) => SpotifyController.updateFromRenderer(data || {}));
+ipcMain.handle('soloist:configure', (_e, key) => SpotifyController.configureSoloist(key));
+ipcMain.handle('soloist:connect', () => SpotifyController.connectSoloist());
+ipcMain.handle('soloist:open-key-page', () => shell.openExternal('https://developer.spotify.com/dashboard/soloist'));
 
 ipcMain.handle('playlists:get', () => PlaylistsStore.getPlaylists());
 ipcMain.handle('playlists:tracks', (_e, id) => PlaylistsStore.fetchPlaylistTracks(id));

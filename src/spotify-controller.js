@@ -4,10 +4,43 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const PlaylistsStore = require('./playlists-store');
+const { app } = require('electron');
+const Auth = require('./spotify-auth');
+const { SoloistPlayer } = require('./soloist-player');
+const SoloistSettings = require('./soloist-settings');
 
 let mainWindowRef = null;
 let pollTimer = null;
 let isPolling = false;
+let account = null;
+let accountCheckedAt = 0;
+let playbackMode = 'desktop';
+let playbackError = '';
+let accountGeneration = 0;
+let switchingAccount = false;
+let soloistDeviceCheckedAt = 0;
+let initialized = Promise.resolve();
+let allowLegacyCredentials = !Auth.loggedOut();
+const premium = new SoloistPlayer({ binary: SoloistSettings.binary(), installationId: app.getPath('userData'),
+  cacheDir: path.join(app.getPath('userData'), 'soloist-player'), readKey: SoloistSettings.key,
+  request: spotifyWebApiRequest, token: getAccessToken });
+
+async function selectPlaybackMode() {
+  const epoch = accountGeneration;
+  const res = await spotifyWebApiRequest('GET', '/me');
+  if (epoch !== accountGeneration) return;
+  if (!res?.ok && account?.product === 'premium') throw new Error('Impossibile verificare il piano Spotify. Riprova tra poco.');
+  account = res?.ok ? res.data : null;
+  accountCheckedAt = Date.now();
+  playbackError = '';
+  let mode = account?.product === 'premium' ? 'premium' : 'desktop';
+  // Some API responses omit product: only trust a paired receiver for that case.
+  if (account && !account.product && premium.eligibility === 'supported') mode = 'premium';
+  if (epoch !== accountGeneration) return;
+  if (mode === 'desktop') premium.stop();
+  playbackMode = mode;
+}
+
 
 const state = {
   isRunning: false,
@@ -68,6 +101,7 @@ function decryptUlanziSecret(obj) {
 }
 
 async function loadUlanziCredentials() {
+  if (!allowLegacyCredentials || Auth.hasSession()) return false;
   try {
     if (!fs.existsSync(ULANZI_DATA_PATH)) return false;
     const raw = JSON.parse(fs.readFileSync(ULANZI_DATA_PATH, 'utf8'));
@@ -99,6 +133,9 @@ async function loadUlanziCredentials() {
 }
 
 async function refreshSpotifyAccessToken() {
+  if (Auth.hasSession()) {
+    try { return !!(await Auth.token(true)); } catch (_) { return false; }
+  }
   if (!cachedRefreshToken || !cachedClientId || !cachedClientSecret) return false;
   try {
     const params = new URLSearchParams();
@@ -112,7 +149,7 @@ async function refreshSpotifyAccessToken() {
         'Authorization': `Basic ${authHeader}`,
         'Content-Type': 'application/x-www-form-urlencoded'
       },
-      body: params
+      body: params, signal: AbortSignal.timeout(15000)
     });
     if (!res.ok) return false;
     const data = await res.json();
@@ -126,6 +163,10 @@ async function refreshSpotifyAccessToken() {
 }
 
 async function getAccessToken() {
+  if (Auth.hasSession()) {
+    try { return await Auth.token(); } catch (_) { return null; }
+  }
+  if (!allowLegacyCredentials) return null;
   if (cachedAccessToken && Date.now() < tokenExpiresAt - 60000) {
     return cachedAccessToken;
   }
@@ -135,8 +176,9 @@ async function getAccessToken() {
 }
 
 async function spotifyWebApiRequest(method, endpoint, body = null, queryParams = null) {
+  const epoch = accountGeneration;
   let token = await getAccessToken();
-  if (!token) return null;
+  if (!token || epoch !== accountGeneration) return null;
 
   const url = new URL(`https://api.spotify.com/v1${endpoint}`);
   if (queryParams) {
@@ -149,6 +191,7 @@ async function spotifyWebApiRequest(method, endpoint, body = null, queryParams =
 
   const options = {
     method,
+    signal: AbortSignal.timeout(10000),
     headers: {
       Authorization: `Bearer ${token}`
     }
@@ -160,14 +203,17 @@ async function spotifyWebApiRequest(method, endpoint, body = null, queryParams =
 
   try {
     let res = await fetch(url, options);
+    if (epoch !== accountGeneration) return null;
 
     // If 401 Unauthorized, token expired: refresh once and retry
     if (res.status === 401) {
       cachedAccessToken = null;
       tokenExpiresAt = 0;
       const refreshed = await refreshSpotifyAccessToken();
-      if (refreshed && cachedAccessToken) {
-        options.headers.Authorization = `Bearer ${cachedAccessToken}`;
+      token = refreshed ? await getAccessToken() : null;
+      if (epoch !== accountGeneration) return null;
+      if (token) {
+        options.headers.Authorization = `Bearer ${token}`;
         res = await fetch(url, options);
       }
     }
@@ -177,6 +223,7 @@ async function spotifyWebApiRequest(method, endpoint, body = null, queryParams =
     }
 
     const text = await res.text();
+    if (epoch !== accountGeneration) return null;
     let data = null;
     try {
       data = text ? JSON.parse(text) : null;
@@ -312,7 +359,9 @@ function getPlayerStateSync() {
     trackUri: state.trackUri || '',
     contextUri: state.contextUri || '',
     volume: typeof state.volume === 'number' ? state.volume : 100,
-    authenticated: true
+    authenticated: !!account || state.isRunning,
+    playbackMode,
+    playbackError: playbackError || premium.error
   };
 }
 
@@ -323,11 +372,25 @@ function pushStateToRenderer() {
 }
 
 async function pollSpotifyState() {
-  if (isPolling) return;
+  if (isPolling || switchingAccount) return;
   isPolling = true;
+  const epoch = accountGeneration;
   try {
     // 1. Prefer Spotify Web API Connect (fast, non-intrusive, exact status)
+    if (premium.child && !premium.deviceId && Date.now() - soloistDeviceCheckedAt > 5000) {
+      soloistDeviceCheckedAt = Date.now();
+      await premium.refreshDevice();
+      if (epoch !== accountGeneration) return;
+      if (premium.eligibility === 'supported' && account && !['free', 'open'].includes(account.product)) playbackMode = 'premium';
+    }
     const webRes = await spotifyWebApiRequest('GET', '/me/player');
+    if (epoch !== accountGeneration) return;
+    if (playbackMode === 'premium' && (!premium.child || !webRes?.ok || webRes.data?.device?.id !== premium.deviceId)) {
+      state.isRunning = !!premium.child;
+      state.isPlaying = false;
+      pushStateToRenderer();
+      return;
+    }
     if (webRes && webRes.ok) {
       if (webRes.status === 204 || !webRes.data) {
         const running = await isSpotifyProcessRunning();
@@ -339,7 +402,7 @@ async function pollSpotifyState() {
 
       const d = webRes.data;
       state.isRunning = true;
-      state.isPlaying = !!d.is_playing;
+      state.isPlaying = !!d.is_playing && !(playbackMode === 'premium' && premium.error);
       state.position = Math.round((d.progress_ms || 0) / 1000);
       if (d.item) {
         state.track = d.item.name || 'Spotify';
@@ -359,6 +422,7 @@ async function pollSpotifyState() {
       if (typeof d.shuffle_state === 'boolean') {
         state.shuffling = d.shuffle_state;
       }
+      state.contextUri = d.context?.uri || '';
       if (d.context && d.context.uri) {
         state.contextUri = d.context.uri;
         lastTrackForContextCheck = state.trackUri;
@@ -370,7 +434,8 @@ async function pollSpotifyState() {
         try {
           const saved = PlaylistsStore.getPlaylists();
           for (const pl of saved) {
-            const tracksRes = await PlaylistsStore.fetchPlaylistTracks(pl.id);
+            const tracksRes = await PlaylistsStore.cachedPlaylistTracks(pl.id);
+            if (epoch !== accountGeneration) return;
             if (tracksRes && Array.isArray(tracksRes.tracks)) {
               if (tracksRes.tracks.some((t) => t.uri === state.trackUri)) {
                 state.contextUri = toUri(pl.id, 'playlist') || pl.id;
@@ -387,6 +452,7 @@ async function pollSpotifyState() {
 
     // 2. Fallback to AppleScript
     const raw = await runOsa(GET_STATE_SCRIPT);
+    if (epoch !== accountGeneration) return;
     if (!raw || raw === 'not_running') {
       state.isRunning = false;
       state.isPlaying = false;
@@ -398,7 +464,8 @@ async function pollSpotifyState() {
     if (parts.length >= 10) {
       const pState = parts[0];
       const pPos = parseInt(parts[1], 10) || 0;
-      const pVol = parseInt(parts[2], 10) || 100;
+      const parsedVolume = parseInt(parts[2], 10);
+      const pVol = Number.isFinite(parsedVolume) ? parsedVolume : 100;
       const pShuff = parts[3] === 'true';
       const cTrack = parts[4] || '';
       const cArtist = parts[5] || '';
@@ -424,7 +491,8 @@ async function pollSpotifyState() {
         try {
           const saved = PlaylistsStore.getPlaylists();
           for (const pl of saved) {
-            const tracksRes = await PlaylistsStore.fetchPlaylistTracks(pl.id);
+            const tracksRes = await PlaylistsStore.cachedPlaylistTracks(pl.id);
+            if (epoch !== accountGeneration) return;
             if (tracksRes && Array.isArray(tracksRes.tracks)) {
               if (tracksRes.tracks.some((t) => t.uri === state.trackUri)) {
                 state.contextUri = toUri(pl.id, 'playlist') || pl.id;
@@ -444,10 +512,16 @@ async function pollSpotifyState() {
 }
 
 const SpotifyController = {
+  audioProcessId: () => !state.isPlaying ? null : playbackMode === 'premium' ? premium.child?.pid : 'com.spotify.client',
   async init(mainWindow) {
     mainWindowRef = mainWindow;
-    await loadUlanziCredentials();
-    hideSpotify().catch(() => {});
+    initialized = (async () => {
+      allowLegacyCredentials = !Auth.loggedOut();
+      await loadUlanziCredentials();
+      await selectPlaybackMode();
+      if (playbackMode === 'desktop') hideSpotify().catch(() => {});
+    })();
+    await initialized;
 
     // Start background state poll (every 850ms)
     clearInterval(pollTimer);
@@ -755,36 +829,137 @@ const SpotifyController = {
   },
 
   async getProfile() {
-    const running = await isSpotifyProcessRunning();
+    await initialized;
+    const running = playbackMode === 'premium' ? !!premium.child : await isSpotifyProcessRunning();
+    const plan = account?.product;
+    const label = playbackMode === 'premium' ? (plan === 'premium' ? 'Premium · Spotify Soloist' : 'Lettore integrato · Accesso verificato') :
+      ['free', 'open'].includes(plan) ? 'Free · Spotify Desktop' : 'Piano non verificato · Spotify Desktop';
     return {
-      authenticated: true,
-      profile: {
-        name: cachedDisplayName || 'Spotify User',
-        product: running ? 'Connesso (Background Connect)' : 'In attesa di Spotify',
-        email: ''
-      }
+      authenticated: !!account || running,
+      needsClientId: !Auth.clientId(),
+      soloist: { configured: SoloistSettings.configured(), installed: fs.existsSync(SoloistSettings.binary()), deviceName: premium.name, paired: premium.eligibility === 'supported', running: !!premium.child },
+      error: playbackError || premium.error,
+      profile: { name: account?.display_name || cachedDisplayName || 'Spotify User', product: label, email: '' }
     };
   },
 
-  async login() {
-    await loadUlanziCredentials();
-    await ensureSpotifyRunning();
-    await pollSpotifyState();
-    return { ok: true };
+  async login(clientId) {
+    if (switchingAccount) return { error: 'Accesso già in corso.' };
+    switchingAccount = true;
+    accountGeneration++;
+    premium.stop();
+    try {
+      await Auth.login(clientId);
+      premium.clearCredentials();
+      cachedAccessToken = null;
+      cachedRefreshToken = null;
+      cachedDisplayName = '';
+      account = null;
+      playbackMode = 'desktop';
+      await selectPlaybackMode();
+      if (playbackMode === 'premium') await premium.start();
+      else await ensureSpotifyRunning();
+      return { ok: true };
+    } catch (err) {
+      playbackError = err.message;
+      return { error: playbackError };
+    } finally {
+      switchingAccount = false;
+      pushStateToRenderer();
+    }
+  },
+
+  async configureSoloist(key) {
+    try {
+      SoloistSettings.save(key);
+      premium.stop();
+      playbackError = '';
+      return { ok: true };
+    } catch (error) { return { error: error.message }; }
+  },
+
+  async connectSoloist() {
+    await initialized;
+    try {
+      await premium.startPairing();
+      const paired = await premium.refreshDevice();
+      if (paired && account && !['free', 'open'].includes(account.product)) playbackMode = 'premium';
+      await pollSpotifyState();
+      return { ok: true, pendingPairing: !paired, deviceName: premium.name };
+    } catch (error) { playbackError = error.message; return { error: playbackError }; }
   },
 
   async logout() {
+    accountGeneration++;
+    premium.clearCredentials();
+    Auth.logout();
+    SoloistSettings.clear();
+    allowLegacyCredentials = false;
+    cachedAccessToken = cachedRefreshToken = cachedClientSecret = cachedClientId = null;
+    cachedDisplayName = '';
+    account = null;
+    playbackMode = 'desktop';
+    playbackError = '';
+    Object.assign(state, { isPlaying: false, isRunning: false, track: 'Spotteck', artist: 'Pronto',
+      album: '', artwork: '', trackUri: '', contextUri: '', position: 0, duration: 0 });
+    pushStateToRenderer();
     return { ok: true };
   },
 
-  updateFromRenderer(_data) {
-    // Spotify desktop is the source of truth for playback
-  },
-
   async restoreWindowOnExit() {
+    accountGeneration++;
+    Auth.cancel();
+    premium.stop();
     clearInterval(pollTimer);
     pollTimer = null;
   }
 };
+
+// All public controls share one routing gate, including hardware media keys.
+const premiumCommands = {
+  playPause: () => ['PUT', state.isPlaying ? '/me/player/pause' : '/me/player/play'],
+  nextTrack: () => ['POST', '/me/player/next'],
+  prevTrack: () => ['POST', '/me/player/previous'],
+  setShuffle: (value) => ['PUT', '/me/player/shuffle', null, { state: !!value }],
+  seek: (value) => {
+    if (!Number.isFinite(value)) throw new Error('Posizione non valida.');
+    return ['PUT', '/me/player/seek', null, { position_ms: Math.max(0, Math.floor(value * 1000)) }];
+  },
+  setVolume: (value) => {
+    if (!Number.isFinite(value)) throw new Error('Volume non valido.');
+    return ['PUT', '/me/player/volume', null, { volume_percent: Math.min(100, Math.max(0, Math.round(value))) }];
+  },
+  playUri: (input) => {
+    const uri = toUri(input);
+    if (!uri) throw new Error('URI non valido.');
+    return ['PUT', '/me/player/play', uri.startsWith('spotify:track:') ? { uris: [uri] } : { context_uri: uri }];
+  },
+  playTrackInContext: (trackInput, contextInput) => {
+    const track = toUri(trackInput);
+    const context = toUri(contextInput);
+    if (!track?.startsWith('spotify:track:') || (contextInput && !context)) throw new Error('URI non valido.');
+    return ['PUT', '/me/player/play', context ? { context_uri: context, offset: { uri: track } } : { uris: [track] }];
+  }
+};
+for (const [name, command] of Object.entries(premiumCommands)) {
+  const desktopCommand = SpotifyController[name];
+  SpotifyController[name] = async (...args) => {
+    await initialized;
+    if (switchingAccount) return { error: 'Completa il login nel browser.' };
+    try {
+      const request = command(...args);
+      if (Date.now() - accountCheckedAt > 5 * 60 * 1000) await selectPlaybackMode();
+      if (playbackMode !== 'premium') return await desktopCommand(...args);
+      const result = await premium.command(...request);
+      playbackError = '';
+      await pollSpotifyState();
+      return result;
+    } catch (err) {
+      playbackError = err.message;
+      pushStateToRenderer();
+      return { error: playbackError };
+    }
+  };
+}
 
 module.exports = SpotifyController;
