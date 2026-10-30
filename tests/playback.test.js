@@ -45,10 +45,14 @@ function controller(product, options = {}) {
       return require(name);
     },
     module: { exports: {} }, console, Buffer, URL, URLSearchParams, AbortSignal,
+    Date: options.clock ? class extends Date { static now() { return options.clock.now; } } : Date,
     setInterval: () => 1, clearInterval() {}, setTimeout: () => 1,
     fetch: async (url, opts) => {
       const endpoint = new URL(url).pathname;
       calls.api.push({ endpoint, opts });
+      const meStatus = endpoint === '/v1/me' && options.meStatus?.();
+      if (meStatus === 0) throw new Error('offline');
+      if (meStatus) return { status: meStatus, ok: false, text: async () => '{}' };
       if (endpoint === '/v1/me/player' && options.playerFails) return { status: 500, ok: false, text: async () => '{}' };
       if (options.commandsFail && endpoint.startsWith('/v1/me/player/') && opts.method !== 'GET') {
         return { status: 403, ok: false, text: async () => '{"error":{"reason":"PREMIUM_REQUIRED"}}' };
@@ -200,3 +204,50 @@ for (const [setup, options] of [['no key', { configured: false }], ['no engine',
     assert.equal((await api.getProfile()).profile.product, 'Premium · Spotify Desktop');
   });
 }
+
+test('a transient account check failure keeps Premium playback and retries soon', async () => {
+  const clock = { now: Date.now() };
+  let meStatus = null;
+  const { api, calls } = controller('premium', { clock, meStatus: () => meStatus });
+  await api.init(null);
+  const checks = () => calls.api.filter((call) => call.endpoint === '/v1/me').length;
+  for (const status of [0, 503, 429]) {
+    meStatus = status;
+    clock.now += 6 * 60 * 1000;
+    assert.equal((await api.playPause()).ok, true, `status ${status}`);
+    assert.equal(api.snapshot().playbackMode, 'premium');
+  }
+  assert.equal(calls.stops, 0);
+  assert.equal(calls.desktop.length, 0);
+  const before = checks();
+  meStatus = null;
+  clock.now += 31 * 1000;
+  await api.playPause();
+  assert.equal(checks(), before + 1, 'retried after 30 s, not 5 min');
+});
+
+test('starting offline retries the plan check after 30 s', async () => {
+  const clock = { now: Date.now() };
+  let meStatus = 0;
+  const { api, calls } = controller('premium', { clock, meStatus: () => meStatus });
+  await api.init(null);
+  assert.equal(api.snapshot().playbackMode, 'desktop');
+  meStatus = null;
+  clock.now += 31 * 1000;
+  await api.playPause();
+  assert.equal(api.snapshot().playbackMode, 'premium');
+  assert.equal(calls.premium.length, 1);
+});
+
+test('a rejected account check signs out of Premium', async () => {
+  const clock = { now: Date.now() };
+  let meStatus = null;
+  const { api, calls } = controller('premium', { clock, meStatus: () => meStatus });
+  await api.init(null);
+  meStatus = 401;
+  clock.now += 6 * 60 * 1000;
+  await api.playPause();
+  assert.equal(api.snapshot().playbackMode, 'desktop');
+  assert.ok(calls.stops > 0);
+  assert.equal((await api.getProfile()).profile.product, 'Piano non verificato · Spotify Desktop');
+});

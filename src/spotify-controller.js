@@ -25,11 +25,19 @@ const premium = new SoloistPlayer({ binary: SoloistSettings.binary(), installati
   cacheDir: path.join(app.getPath('userData'), 'soloist-player'), readKey: SoloistSettings.key,
   request: spotifyWebApiRequest, token: getAccessToken });
 
+const ACCOUNT_RECHECK_MS = 5 * 60 * 1000;
+const ACCOUNT_RETRY_MS = 30 * 1000;
+
 async function selectPlaybackMode() {
   const epoch = accountGeneration;
   const res = await spotifyWebApiRequest('GET', '/me');
   if (epoch !== accountGeneration) return;
-  if (!res?.ok && account?.product === 'premium') throw new Error('Impossibile verificare il piano Spotify. Riprova tra poco.');
+  // A network error, rate limit or server error says nothing about the plan:
+  // keep the current mode and retry soon. No token or a 401 means signed out.
+  if (res && !res.ok && (res.status === 0 || res.status === 429 || res.status >= 500)) {
+    accountCheckedAt = Date.now() - ACCOUNT_RECHECK_MS + ACCOUNT_RETRY_MS;
+    return;
+  }
   account = res?.ok ? res.data : null;
   accountCheckedAt = Date.now();
   playbackError = '';
@@ -891,7 +899,7 @@ for (const [name, command] of Object.entries(premiumCommands)) {
     if (switchingAccount) return { error: 'Completa il login nel browser.' };
     try {
       const request = command(...args);
-      if (Date.now() - accountCheckedAt > 5 * 60 * 1000) await selectPlaybackMode();
+      if (Date.now() - accountCheckedAt > ACCOUNT_RECHECK_MS) await selectPlaybackMode();
       if (playbackMode !== 'premium') return await desktopCommand(...args);
       const result = await premium.command(...request);
       playbackError = '';
