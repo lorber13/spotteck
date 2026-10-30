@@ -6,4 +6,5 @@ backups/
 *.log
 graphify-out/
 
-build/native/
+target/
+src-tauri/gen/

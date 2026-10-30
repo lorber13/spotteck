@@ -155,12 +155,12 @@
   let currentArtworkUrl = '';
 
   let toastTimer = null;
-  function showToast(text) {
+  function showToast(text, duration = 1350) {
     if (!presetToast) return;
     presetToast.textContent = text;
     presetToast.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => presetToast.classList.remove('show'), 1350);
+    toastTimer = setTimeout(() => presetToast.classList.remove('show'), duration);
   }
 
   function isBlobMode(id) {
@@ -461,6 +461,11 @@
   const bridge = window.spotteck || window.spotdeck;
 
   // Format seconds -> m:ss
+  // Refused controls (signed out, Free plan, nothing playing) explain themselves on the stage.
+  function reportControl(result) {
+    if (result?.error) showToast(result.error, 3200);
+  }
+
   function fmtDuration(sec) {
     const s = Math.max(0, Math.round(sec || 0));
     const m = Math.floor(s / 60);
@@ -513,31 +518,31 @@
     if (!bridge || !bridge.getProfile) return;
     try {
       const res = await bridge.getProfile();
-      document.getElementById('spotifySetup').hidden = !res?.needsClientId;
-      document.getElementById('spotifyStatus').textContent = res?.error || '';
-      document.getElementById('soloistSetup').hidden = ['free', 'open'].some((plan) => res?.profile?.product?.toLowerCase().startsWith(plan));
-      if (res?.soloist) {
-        document.getElementById('soloistStatus').textContent = !res.soloist.installed ? 'Motore Soloist da installare.' :
-          res.soloist.paired ? 'Lettore associato. Uscita: predefinita di macOS.' :
-          res.soloist.configured ? `Seleziona ${res.soloist.deviceName} nel menu Dispositivi di Spotify per il primo collegamento.` : 'Genera la chiave e incollala nel campo protetto.';
-      }
+      const status = document.getElementById('spotifyStatus');
+      status.textContent = res?.message || '';
       if (res && res.authenticated && res.profile) {
         const p = res.profile;
         profileName.textContent = p.name || 'Account Spotify';
-        profileSub.textContent = [p.product, p.email].filter(Boolean).join(' · ') || 'Connesso';
+        profileSub.textContent = `${p.product || 'Premium'} · Spotteck`;
         profileLed.classList.add('on');
         if (p.avatar) {
-          profileAvatar.innerHTML = `<img src="${p.avatar}" alt="">`;
+          const img = document.createElement('img');
+          img.src = p.avatar;
+          img.alt = '';
+          profileAvatar.replaceChildren(img);
         } else {
           profileAvatar.textContent = (p.name || 'S').charAt(0).toUpperCase();
         }
+        profileLoginBtn.textContent = 'Cambia Account';
         profileLogoutBtn.style.display = '';
       } else {
-        profileName.textContent = 'Non connesso';
-        profileSub.textContent = 'Effettua il login per accedere a Spotify';
+        const signedOut = !res || res.readiness === 'signed-out';
+        profileName.textContent = signedOut ? 'Non connesso' : 'Account Spotify';
+        profileSub.textContent = signedOut ? 'Accedi con Spotify Premium' : (res.message || 'Spotify');
         profileLed.classList.remove('on');
         profileAvatar.textContent = '–';
-        profileLogoutBtn.style.display = 'none';
+        profileLoginBtn.textContent = signedOut ? 'Accedi' : 'Cambia Account';
+        profileLogoutBtn.style.display = signedOut ? 'none' : '';
       }
     } catch (_e) {}
   }
@@ -569,9 +574,10 @@
       const status = document.getElementById('spotifyStatus');
       status.textContent = 'Completa l’accesso nel browser…';
       try {
-        const result = await bridge.login(document.getElementById('spotifyClientId').value.trim());
+        const result = await bridge.login();
         await refreshProfileUI();
         if (result?.error) status.textContent = result.error;
+        else if (!playlists.some((p) => !p.pinned)) await loadPlaylists();
         await pollSpotify();
       } catch (_) {
         status.textContent = 'Accesso non riuscito. Riprova.';
@@ -589,27 +595,6 @@
       await pollSpotify();
     });
   }
-
-  document.getElementById('soloistKeyPage').addEventListener('click', () => bridge.openSoloistKeyPage());
-  document.getElementById('soloistSave').addEventListener('click', async () => {
-    const button = document.getElementById('soloistSave');
-    const field = document.getElementById('soloistKey');
-    const status = document.getElementById('soloistStatus');
-    button.disabled = true;
-    try {
-      if (field.value) {
-        const saving = bridge.configureSoloist(field.value);
-        field.value = '';
-        const saved = await saving;
-        if (saved?.error) { status.textContent = saved.error; return; }
-      }
-      status.textContent = 'Collegamento in corso: al primo utilizzo scegli Spotteck Soloist nel menu Dispositivi di Spotify.';
-      const result = await bridge.connectSoloist();
-      status.textContent = result?.error || (result?.pendingPairing ? `Soloist è avviato. Seleziona ${result.deviceName} nel menu Dispositivi di Spotify. Poi potrai chiudere Spotify.` : 'Lettore collegato. Ora puoi chiudere Spotify.');
-      await pollSpotify();
-    } catch (_) { status.textContent = 'Collegamento non riuscito. Riprova.'; }
-    finally { button.disabled = false; }
-  });
 
   // ====================================================================
   // PLAYLISTS MANAGEMENT
@@ -694,7 +679,7 @@
       btn.addEventListener('click', async () => {
         player.activePlaylistId = p.id;
         updatePlaylistActiveState();
-        await window.spotteck.playUri(p.id);
+        reportControl(await window.spotteck.playUri(p.id));
         setTimeout(pollSpotify, 280);
       });
 
@@ -729,6 +714,7 @@
     else drawerCover.removeAttribute('src');
     drawerCover.classList.toggle('active', isSamePlaylist(player.activePlaylistId, p.id));
     drawerTitle.textContent = p.name || 'Playlist';
+    drawerRemove.hidden = !p.pinned;
     drawerList.innerHTML = '<div class="drawer-msg">Caricamento brani in corso…</div>';
     drawer.classList.add('open');
 
@@ -769,7 +755,7 @@
         player.trackUri = t.uri;
         updatePlaylistActiveState();
         syncDrawerTrackSelection(false);
-        await window.spotteck.playTrackInContext(t.uri, p.id);
+        reportControl(await window.spotteck.playTrackInContext(t.uri, p.id));
         setTimeout(pollSpotify, 280);
       });
 
@@ -789,7 +775,7 @@
     if (!drawerPlaylist) return;
     player.activePlaylistId = drawerPlaylist.id;
     updatePlaylistActiveState();
-    await window.spotteck.playUri(drawerPlaylist.id);
+    reportControl(await window.spotteck.playUri(drawerPlaylist.id));
     drawer.classList.remove('open');
     setTimeout(pollSpotify, 280);
   });
@@ -836,22 +822,22 @@
 
   // Transport Controls
   playBtn.addEventListener('click', async () => {
-    await window.spotteck.playPause();
+    reportControl(await window.spotteck.playPause());
     setTimeout(pollSpotify, 180);
   });
   prevBtn.addEventListener('click', async () => {
-    await window.spotteck.prev();
+    reportControl(await window.spotteck.prev());
     setTimeout(pollSpotify, 220);
   });
   nextBtn.addEventListener('click', async () => {
-    await window.spotteck.next();
+    reportControl(await window.spotteck.next());
     setTimeout(pollSpotify, 220);
   });
   shuffleBtn.addEventListener('click', async () => {
     const nextState = !player.shuffling;
     player.shuffling = nextState;
     updateTransportUI();
-    await bridge.setShuffle(nextState);
+    reportControl(await bridge.setShuffle(nextState));
     setTimeout(pollSpotify, 220);
   });
 
@@ -892,45 +878,6 @@
       bgArtwork.src = player.artwork;
       coverImage.src = player.artwork;
     }
-
-    // Sync with macOS Now Playing / Hardware Media Keys (F7 / F8 / F9)
-    if ('mediaSession' in navigator) {
-      try {
-        navigator.mediaSession.playbackState = player.isPlaying ? 'playing' : 'paused';
-        if (typeof MediaMetadata !== 'undefined') {
-          navigator.mediaSession.metadata = new MediaMetadata({
-            title: player.track || 'Spotteck',
-            artist: player.artist || '',
-            album: player.album || 'Spotteck',
-            artwork: player.artwork ? [{ src: player.artwork, sizes: '512x512', type: 'image/jpeg' }] : []
-          });
-        }
-      } catch (_e) {}
-    }
-  }
-
-  // Register macOS MediaSession hardware key handlers
-  if ('mediaSession' in navigator) {
-    const bindMedia = (action, fn) => {
-      try { navigator.mediaSession.setActionHandler(action, fn); } catch (_e) {}
-    };
-    bindMedia('play', () => {
-      window.spotteck.playPause();
-    });
-    bindMedia('pause', () => {
-      window.spotteck.playPause();
-    });
-    bindMedia('previoustrack', () => {
-      window.spotteck.prev();
-    });
-    bindMedia('nexttrack', () => {
-      window.spotteck.next();
-    });
-    bindMedia('seekto', (details) => {
-      if (details && typeof details.seekTime === 'number' && bridge && bridge.seek) {
-        bridge.seek(details.seekTime);
-      }
-    });
   }
 
   // ====================================================================
@@ -1049,9 +996,8 @@
     }
   }
 
-  // Initial Load — render "+" button immediately, then populate saved playlists
-  renderPlaylists();
-  (async () => {
+  // Library playlists, then the ones pinned with "+". Reloaded when the account changes.
+  async function loadPlaylists() {
     try {
       const loaded = await bridge.getPlaylists();
       if (Array.isArray(loaded)) {
@@ -1062,6 +1008,13 @@
       addError.textContent = e.message || 'Archivio playlist non disponibile.';
       addModal.classList.add('open');
     }
+  }
+  bridge?.onPlaylistsChanged?.(() => loadPlaylists());
+
+  // Initial Load — render "+" button immediately, then populate playlists
+  renderPlaylists();
+  (async () => {
+    await loadPlaylists();
     await pollSpotify();
   })();
 

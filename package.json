@@ -1,47 +1,18 @@
 {
   "name": "spotteck",
   "productName": "Spotteck",
-  "version": "1.1.0",
-  "description": "Minimalist Braun-inspired Spotify Deck & Analog Visualizer",
-  "main": "src/main.js",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Minimalist Braun-inspired Spotify Premium player & analog visualizer",
   "scripts": {
-    "test": "node --test tests/*.test.js",
-    "start": "npm run build:audio && electron .",
-    "pack": "npm run build:audio && electron-builder --dir",
-    "dist": "npm run build:audio && electron-builder --mac",
-    "build:audio": "mkdir -p build/native && xcrun swiftc -O -target arm64-apple-macos14.2 -module-cache-path /tmp/spotteck-swift-cache native/audio-meter.swift -o build/native/audio-meter -framework CoreAudio -framework Accelerate"
-  },
-  "build": {
-    "appId": "com.braun.spotteck",
-    "mac": {
-      "category": "public.app-category.music",
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "icon": "build/icon.icns",
-      "identity": null,
-      "extendInfo": {
-        "NSAudioCaptureUsageDescription": "Spotteck analizza solo l\u2019audio del lettore per animare i visualizzatori. Non usa il microfono e non salva registrazioni."
-      },
-      "minimumSystemVersion": "14.2"
-    },
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "src/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "build/native/audio-meter",
-        "to": "audio-meter"
-      }
-    ]
+    "test": "cargo test --workspace && node --test tests/*.test.js",
+    "start": "tauri dev",
+    "pack": "tauri build --target aarch64-apple-darwin --bundles app",
+    "dist": "tauri build --target aarch64-apple-darwin",
+    "check:ui": "node tools/check-ui.js",
+    "tauri": "tauri"
   },
   "devDependencies": {
-    "electron": "45.0.0",
-    "electron-builder": "26.18.0"
+    "@tauri-apps/cli": "2.12.4"
   }
 }

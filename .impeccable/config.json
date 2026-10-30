@@ -7,7 +7,7 @@
         "rule": "buried-raster",
         "value": "*",
         "files": [
-          "src/index.html"
+          "ui/index.html"
         ],
         "createdAt": "2026-10-29T13:35:11.152Z",
         "reason": "Codex review: artwork starts invisible and app.js updateTransportUI reveals it after image.onload via ready class"
@@ -16,7 +16,7 @@
         "rule": "dark-glow",
         "value": "*",
         "files": [
-          "src/index.html"
+          "ui/index.html"
         ],
         "createdAt": "2026-10-29T13:35:40.681Z",
         "reason": "Codex review: analog deck hardware uses orange indicator LEDs in existing UI, retained for this login-only change"
@@ -25,7 +25,7 @@
         "rule": "broken-image",
         "value": "*",
         "files": [
-          "src/index.html"
+          "ui/index.html"
         ],
         "createdAt": "2026-10-29T13:45:22.111Z",
         "reason": "Codex review: both image elements now remain hidden until their dynamic Spotify artwork loads successfully; onerror hides failures"

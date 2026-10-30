@@ -2,7 +2,6 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; media-src 'self' http://127.0.0.1:* https: blob: data:; connect-src 'self' http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; script-src 'self'">
   <title>Spotteck</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -10,7 +9,7 @@
   <main id="faceplate" class="faceplate">
     <div class="anodized-grain"></div>
     <!-- Drag strip only: the traffic lights are the native macOS ones -->
-    <div class="drag-strip"></div>
+    <div class="drag-strip" data-tauri-drag-region></div>
 
     <!-- Top-Right Fullscreen / Hide Playlists Toggle Button -->
     <button id="zenBtn" class="zen-btn" aria-label="Tutto Schermo">
@@ -242,23 +241,9 @@
               <button id="profileLoginBtn" class="key key-orange key-wide">Cambia Account</button>
               <button id="profileLogoutBtn" class="key key-wide">Disconnetti</button>
             </div>
-            <div id="spotifySetup" hidden>
-              <label class="settings-hint" for="spotifyClientId">Client ID dell’app Spotify Developers</label>
-              <input id="spotifyClientId" type="text" maxlength="32" autocomplete="off" spellcheck="false" aria-describedby="spotifySetupHint">
-              <p id="spotifySetupHint" class="settings-hint">Configurazione iniziale: registra http://127.0.0.1:43821/callback come Redirect URI. Non serve il Client Secret.</p>
-            </div>
             <p id="spotifyStatus" class="settings-hint" role="status" aria-live="polite"></p>
-            <div id="soloistSetup">
-              <label class="settings-hint" for="soloistKey">Chiave personale Spotify Soloist</label>
-              <input id="soloistKey" class="modal-input" type="password" autocomplete="off" maxlength="2048" placeholder="Incolla qui la tua chiave" aria-describedby="soloistHint">
-              <div class="profile-actions">
-                <button id="soloistKeyPage" class="key key-wide">Genera chiave</button>
-                <button id="soloistSave" class="key key-orange key-wide">Salva e collega</button>
-              </div>
-              <p id="soloistHint" class="settings-hint">La chiave resta cifrata su questo Mac. Al primo avvio seleziona il dispositivo Spotteck Soloist in Spotify; poi potrai chiudere Spotify.</p>
-              <p id="soloistStatus" class="settings-hint" role="status" aria-live="polite"></p>
-          <p id="audioAnalysisStatus" role="status" style="font-size:14px">Visualizzatori: in attesa dell’audio reale.</p>
-            </div>
+            <p id="playerHint" class="settings-hint">Spotteck suona come dispositivo Spotify Connect: lo trovi anche nel menu Dispositivi dell’app Spotify sul telefono. Uscita: predefinita di macOS.</p>
+            <p id="audioAnalysisStatus" class="settings-hint" role="status">Visualizzatori: in attesa dell’audio reale.</p>
           </div>
         </div>
 
@@ -287,6 +272,7 @@
     </div>
   </main>
 
+  <script src="bridge.js"></script>
   <script src="visualizers.js"></script>
   <script src="app.js"></script>
 </body>

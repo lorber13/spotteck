@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Spotteck",
+  "version": "2.0.0",
+  "identifier": "com.braun.spotteck",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Spotteck",
+        "width": 329,
+        "height": 628,
+        "minWidth": 329,
+        "minHeight": 440,
+        "resizable": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 14, "y": 13 },
+        "backgroundColor": "#141413"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "category": "Music",
+    "shortDescription": "Spotify Premium in stile Braun, con visualizzatori analogici",
+    "icon": ["../build/icon.png", "../build/icon.icns"],
+    "macOS": {
+      "minimumSystemVersion": "14.2"
+    }
+  }
+}

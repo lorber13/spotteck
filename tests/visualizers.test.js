@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 function instruments(devicePixelRatio) {
   const context = { window: { devicePixelRatio }, document: { createElement: () => fakeCanvas(0, 0) } };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/visualizers.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/visualizers.js'), 'utf8'), context);
   return context;
 }
 
