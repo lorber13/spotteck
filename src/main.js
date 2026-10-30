@@ -1,9 +1,10 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, shell, screen } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const SpotifyController = require('./spotify-controller');
 const PlaylistsStore = require('./playlists-store');
 const { AudioMeter } = require('./audio-meter');
+const { visibleBounds } = require('./window-bounds');
 let audioMeter;
 
 // Allow WebAudio AudioContext, <audio>.play(), and macOS Hardware Media Keys (F7/F8/F9 & Now Playing)
@@ -36,7 +37,8 @@ function scheduleSaveBounds() {
 }
 
 function createWindow() {
-  const initial = loadBounds();
+  // Drop a position on a display that is no longer connected, or the window opens off-screen.
+  const initial = visibleBounds(loadBounds(), screen.getAllDisplays().map((display) => display.workArea));
 
   const opts = {
     width: Math.max(329, initial.width || 980),
