@@ -8,7 +8,7 @@ const os = require('node:os');
 const { PremiumPlayer } = require('../src/premium-player');
 
 function controller(product, options = {}) {
-  const calls = { desktop: [], premium: [], api: [], stops: 0 };
+  const calls = { desktop: [], premium: [], api: [], stops: 0, playlistFetches: [] };
   let session = true;
   const auth = { hasSession: () => session, loggedOut: () => false,
     token: async () => {
@@ -21,7 +21,9 @@ function controller(product, options = {}) {
     require(name) {
       if (name === 'electron') return { app };
       if (name === './spotify-auth') return auth;
-      if (name === './playlists-store') return { getPlaylists: () => [] };
+      if (name === './playlists-store') return { getPlaylists: () => options.playlists || [],
+        cachedPlaylistTracks: (id) => ({ tracks: options.cachedTracks?.(id) || [] }),
+        fetchPlaylistTracks: async (id) => { calls.playlistFetches.push(id); return options.fetchTracks?.(id) || { success: false }; } };
       if (name === './soloist-settings') return { binary: () => options.installed === false ? '/missing/soloist' : process.execPath,
         configured: () => options.configured !== false, key: () => 'test-key', save() {}, clear() {} };
       if (name === './soloist-player') return { SoloistPlayer: class {
@@ -292,4 +294,14 @@ test('the retry after a 401 gets its own timeout', async () => {
   assert.notEqual(next[1].signal, next[0].signal);
   assert.equal(next[1].signal.aborted, false);
   assert.ok(!calls.desktop.some((call) => /next track/.test(call.args[1])), 'no AppleScript fallback after a good retry');
+});
+
+test('a track without context is matched to the saved playlist that contains it', async () => {
+  const tracks = [{ uri: 'spotify:track:saved' }];
+  const { api } = controller('free', { playlists: [{ id: 'spotify:playlist:mine' }, { id: 'spotify:playlist:saved' }],
+    cachedTracks: (id) => id === 'spotify:playlist:saved' ? tracks : [], fetchTracks: (id) => ({ success: true, tracks: id === 'spotify:playlist:saved' ? tracks : [] }),
+    playerData: () => ({ is_playing: true, item: { uri: 'spotify:track:saved' }, context: null }) });
+  await api.init(null);
+  for (let i = 0; !api.snapshot().contextUri && i < 50; i++) await new Promise(setImmediate);
+  assert.equal(api.snapshot().contextUri, 'spotify:playlist:saved');
 });

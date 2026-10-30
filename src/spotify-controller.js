@@ -380,6 +380,18 @@ function getPlayerStateSync() {
   };
 }
 
+// The saved playlist that contains trackUri, '' if none does, or null if the account changed meanwhile.
+async function savedPlaylistContext(trackUri, epoch) {
+  try {
+    for (const pl of PlaylistsStore.getPlaylists()) {
+      const tracksRes = await PlaylistsStore.cachedPlaylistTracks(pl.id);
+      if (epoch !== accountGeneration) return null;
+      if (tracksRes?.tracks?.some((t) => t.uri === trackUri)) return toUri(pl.id, 'playlist') || pl.id;
+    }
+  } catch (_e) {}
+  return '';
+}
+
 function pushStateToRenderer() {
   if (mainWindowRef && !mainWindowRef.isDestroyed()) {
     mainWindowRef.webContents.send('spotify:state', getPlayerStateSync());
@@ -446,19 +458,9 @@ async function pollSpotifyState() {
       // If contextUri is missing, match against saved playlists (only once per track change)
       if (!state.contextUri && state.trackUri && state.trackUri !== lastTrackForContextCheck) {
         lastTrackForContextCheck = state.trackUri;
-        try {
-          const saved = PlaylistsStore.getPlaylists();
-          for (const pl of saved) {
-            const tracksRes = await PlaylistsStore.cachedPlaylistTracks(pl.id);
-            if (epoch !== accountGeneration) return;
-            if (tracksRes && Array.isArray(tracksRes.tracks)) {
-              if (tracksRes.tracks.some((t) => t.uri === state.trackUri)) {
-                state.contextUri = toUri(pl.id, 'playlist') || pl.id;
-                break;
-              }
-            }
-          }
-        } catch (_e) {}
+        const match = await savedPlaylistContext(state.trackUri, epoch);
+        if (match === null) return;
+        if (match) state.contextUri = match;
       }
 
       pushStateToRenderer();
@@ -503,19 +505,9 @@ async function pollSpotifyState() {
 
       if (!state.contextUri && state.trackUri && state.trackUri !== lastTrackForContextCheck) {
         lastTrackForContextCheck = state.trackUri;
-        try {
-          const saved = PlaylistsStore.getPlaylists();
-          for (const pl of saved) {
-            const tracksRes = await PlaylistsStore.cachedPlaylistTracks(pl.id);
-            if (epoch !== accountGeneration) return;
-            if (tracksRes && Array.isArray(tracksRes.tracks)) {
-              if (tracksRes.tracks.some((t) => t.uri === state.trackUri)) {
-                state.contextUri = toUri(pl.id, 'playlist') || pl.id;
-                break;
-              }
-            }
-          }
-        } catch (_e) {}
+        const match = await savedPlaylistContext(state.trackUri, epoch);
+        if (match === null) return;
+        if (match) state.contextUri = match;
       }
 
       pushStateToRenderer();
