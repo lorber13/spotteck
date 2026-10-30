@@ -22,7 +22,6 @@ function controller(product, options = {}) {
       if (name === 'electron') return { app };
       if (name === './spotify-auth') return auth;
       if (name === './playlists-store') return { getPlaylists: () => options.playlists || [],
-        cachedPlaylistTracks: (id) => ({ tracks: options.cachedTracks?.(id) || [] }),
         fetchPlaylistTracks: async (id) => { calls.playlistFetches.push(id); return options.fetchTracks?.(id) || { success: false }; } };
       if (name === './soloist-settings') return { binary: () => options.installed === false ? '/missing/soloist' : process.execPath,
         configured: () => options.configured !== false, key: () => 'test-key', save() {}, clear() {} };
@@ -299,9 +298,35 @@ test('the retry after a 401 gets its own timeout', async () => {
 test('a track without context is matched to the saved playlist that contains it', async () => {
   const tracks = [{ uri: 'spotify:track:saved' }];
   const { api } = controller('free', { playlists: [{ id: 'spotify:playlist:mine' }, { id: 'spotify:playlist:saved' }],
-    cachedTracks: (id) => id === 'spotify:playlist:saved' ? tracks : [], fetchTracks: (id) => ({ success: true, tracks: id === 'spotify:playlist:saved' ? tracks : [] }),
+    fetchTracks: (id) => ({ success: true, tracks: id === 'spotify:playlist:saved' ? tracks : [] }),
     playerData: () => ({ is_playing: true, item: { uri: 'spotify:track:saved' }, context: null }) });
   await api.init(null);
   for (let i = 0; !api.snapshot().contextUri && i < 50; i++) await new Promise(setImmediate);
   assert.equal(api.snapshot().contextUri, 'spotify:playlist:saved');
+});
+
+test('saved playlists are matched without opening them first, and the match lasts the whole track', async () => {
+  const tracks = [{ uri: 'spotify:track:saved' }];
+  const { api, calls } = controller('free', { playlists: [{ id: 'spotify:playlist:saved' }],
+    fetchTracks: () => ({ success: true, tracks }),
+    playerData: () => ({ is_playing: true, item: { uri: 'spotify:track:saved' }, context: null }) });
+  await api.init(null);
+  await new Promise(setImmediate);
+  for (let poll = 0; poll < 3; poll++) assert.equal((await api.getPlayerState()).contextUri, 'spotify:playlist:saved', `poll ${poll}`);
+  assert.equal(calls.playlistFetches.length, 1, 'loaded once per track');
+});
+
+test('a failed playlist load is retried after 30 s, not on every poll', async () => {
+  const clock = { now: Date.now() };
+  let online = false;
+  const { api, calls } = controller('free', { clock, playlists: [{ id: 'spotify:playlist:saved' }],
+    fetchTracks: () => online ? { success: true, tracks: [{ uri: 'spotify:track:saved' }] } : { success: false },
+    playerData: () => ({ is_playing: true, item: { uri: 'spotify:track:saved' }, context: null }) });
+  await api.init(null);
+  await new Promise(setImmediate);
+  await api.getPlayerState();
+  assert.equal(calls.playlistFetches.length, 1);
+  online = true;
+  clock.now += 31 * 1000;
+  assert.equal((await api.getPlayerState()).contextUri, 'spotify:playlist:saved');
 });

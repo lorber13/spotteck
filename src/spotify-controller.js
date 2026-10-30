@@ -69,7 +69,6 @@ const state = {
 };
 
 const URI_RE = /^spotify:(track|playlist|album|artist):[A-Za-z0-9]+$/;
-let lastTrackForContextCheck = null;
 
 function toUri(input, defaultType = 'playlist') {
   if (!input) return null;
@@ -380,16 +379,25 @@ function getPlayerStateSync() {
   };
 }
 
+const PLAYLIST_RETRY_MS = 30 * 1000;
+let savedContext = { trackUri: null, contextUri: '', retryAt: 0 };
+
 // The saved playlist that contains trackUri, '' if none does, or null if the account changed meanwhile.
+// Remembered per track; if a playlist failed to load, it is looked up again after 30 s.
 async function savedPlaylistContext(trackUri, epoch) {
+  if (savedContext.trackUri === trackUri && Date.now() < savedContext.retryAt) return savedContext.contextUri;
+  let contextUri = '';
+  let complete = true;
   try {
     for (const pl of PlaylistsStore.getPlaylists()) {
-      const tracksRes = await PlaylistsStore.cachedPlaylistTracks(pl.id);
+      const tracksRes = await PlaylistsStore.fetchPlaylistTracks(pl.id);
       if (epoch !== accountGeneration) return null;
-      if (tracksRes?.tracks?.some((t) => t.uri === trackUri)) return toUri(pl.id, 'playlist') || pl.id;
+      if (!tracksRes?.success) { complete = false; continue; }
+      if (tracksRes.tracks?.some((t) => t.uri === trackUri)) { contextUri = toUri(pl.id, 'playlist') || pl.id; break; }
     }
-  } catch (_e) {}
-  return '';
+  } catch (_e) { complete = false; }
+  savedContext = { trackUri, contextUri, retryAt: complete || contextUri ? Infinity : Date.now() + PLAYLIST_RETRY_MS };
+  return contextUri;
 }
 
 function pushStateToRenderer() {
@@ -452,15 +460,13 @@ async function pollSpotifyState() {
       state.contextUri = d.context?.uri || '';
       if (d.context && d.context.uri) {
         state.contextUri = d.context.uri;
-        lastTrackForContextCheck = state.trackUri;
       }
 
       // If contextUri is missing, match against saved playlists (only once per track change)
-      if (!state.contextUri && state.trackUri && state.trackUri !== lastTrackForContextCheck) {
-        lastTrackForContextCheck = state.trackUri;
+      if (!state.contextUri && state.trackUri) {
         const match = await savedPlaylistContext(state.trackUri, epoch);
         if (match === null) return;
-        if (match) state.contextUri = match;
+        state.contextUri = match;
       }
 
       pushStateToRenderer();
@@ -503,11 +509,10 @@ async function pollSpotifyState() {
       if (cArt) state.artwork = cArt;
       if (cId) state.trackUri = cId;
 
-      if (!state.contextUri && state.trackUri && state.trackUri !== lastTrackForContextCheck) {
-        lastTrackForContextCheck = state.trackUri;
+      if (!state.contextUri && state.trackUri) {
         const match = await savedPlaylistContext(state.trackUri, epoch);
         if (match === null) return;
-        if (match) state.contextUri = match;
+        state.contextUri = match;
       }
 
       pushStateToRenderer();

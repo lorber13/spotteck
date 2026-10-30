@@ -144,9 +144,4 @@ function removePlaylist(id) {
   return current;
 }
 
-function cachedPlaylistTracks(input) {
-  const cached = playlistCache.get(playlistIdOf(input));
-  return { tracks: cached && Date.now() - cached.at < CACHE_MS ? cached.tracks : [] };
-}
-
-module.exports = { cachedPlaylistTracks, getPlaylists, savePlaylists, addPlaylistByUrl, removePlaylist, fetchPlaylistTracks };
+module.exports = { getPlaylists, savePlaylists, addPlaylistByUrl, removePlaylist, fetchPlaylistTracks };
