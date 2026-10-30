@@ -50,6 +50,7 @@ class PremiumPlayer {
 
   stop() {
     this.generation++;
+    this.error = '';
     const child = this.child;
     this.child = null;
     if (child) {

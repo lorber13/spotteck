@@ -122,3 +122,19 @@ test('pairing publishes only the public port and restarts the stored session aft
     assert.equal(player.error, '');
   } finally { player.stop(); fs.rmSync(cacheDir, { recursive: true, force: true }); }
 });
+
+test('a Soloist crash message does not outlive stop()', async () => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'soloist-error-test-'));
+  const child = new EventEmitter();
+  child.kill = () => {};
+  const player = new SoloistPlayer({ binary: process.execPath, cacheDir, installationId: 'test', readKey: () => 'personal-secret',
+    spawnProcess: () => child, sleep: async () => {},
+    request: async () => ({ ok: true, data: { devices: [{ name: player.name, id: 'soloist-device', is_active: true }] } }) });
+  try {
+    await player.start();
+    child.emit('exit', 1);
+    assert.match(player.error, /arrestato/);
+    player.stop();
+    assert.equal(player.error, '', 'logout or a switch to desktop mode must not keep showing the crash');
+  } finally { player.stop(); fs.rmSync(cacheDir, { recursive: true, force: true }); }
+});
