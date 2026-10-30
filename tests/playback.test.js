@@ -17,7 +17,8 @@ function controller(product, options = {}) {
       if (name === 'electron') return { app };
       if (name === './spotify-auth') return auth;
       if (name === './playlists-store') return { getPlaylists: () => [] };
-      if (name === './soloist-settings') return { binary: () => '', configured: () => true, key: () => 'test-key', save() {}, clear() {} };
+      if (name === './soloist-settings') return { binary: () => options.installed === false ? '/missing/soloist' : process.execPath,
+        configured: () => options.configured !== false, key: () => 'test-key', save() {}, clear() {} };
       if (name === './soloist-player') return { SoloistPlayer: class {
         eligibility = options.paired ? 'supported' : 'unknown';
         child = null;
@@ -187,3 +188,15 @@ test('desktop AppleScript fallbacks are well formed', async () => {
     for (const script of scripts) assert.equal(unbalancedAppleScript(script), null, `${method}:\n${script}`);
   }
 });
+
+for (const [setup, options] of [['no key', { configured: false }], ['no engine', { installed: false }]]) {
+  test(`Premium without Soloist (${setup}) keeps Spotify Desktop controls`, async () => {
+    const { api, calls } = controller('premium', options);
+    await api.init(null);
+    assert.equal((await api.playPause()).ok, true);
+    assert.equal(calls.premium.length, 0);
+    assert.ok(calls.desktop.some((call) => call.file === 'osascript'));
+    assert.equal(api.snapshot().playbackMode, 'desktop');
+    assert.equal((await api.getProfile()).profile.product, 'Premium · Spotify Desktop');
+  });
+}

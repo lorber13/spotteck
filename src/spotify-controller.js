@@ -33,9 +33,11 @@ async function selectPlaybackMode() {
   account = res?.ok ? res.data : null;
   accountCheckedAt = Date.now();
   playbackError = '';
-  let mode = account?.product === 'premium' ? 'premium' : 'desktop';
+  // Premium playback needs Soloist set up; until then Spotify Desktop keeps working.
+  const soloistReady = SoloistSettings.configured() && fs.existsSync(SoloistSettings.binary());
+  let mode = soloistReady && account?.product === 'premium' ? 'premium' : 'desktop';
   // Some API responses omit product: only trust a paired receiver for that case.
-  if (account && !account.product && premium.eligibility === 'supported') mode = 'premium';
+  if (soloistReady && account && !account.product && premium.eligibility === 'supported') mode = 'premium';
   if (epoch !== accountGeneration) return;
   if (mode === 'desktop') premium.stop();
   playbackMode = mode;
@@ -772,6 +774,7 @@ const SpotifyController = {
     const running = playbackMode === 'premium' ? !!premium.child : await isSpotifyProcessRunning();
     const plan = account?.product;
     const label = playbackMode === 'premium' ? (plan === 'premium' ? 'Premium · Spotify Soloist' : 'Lettore integrato · Accesso verificato') :
+      plan === 'premium' ? 'Premium · Spotify Desktop' :
       ['free', 'open'].includes(plan) ? 'Free · Spotify Desktop' : 'Piano non verificato · Spotify Desktop';
     return {
       authenticated: !!account || running,
@@ -813,6 +816,7 @@ const SpotifyController = {
       SoloistSettings.save(key);
       premium.stop();
       playbackError = '';
+      accountCheckedAt = 0; // re-pick the playback mode on the next control
       return { ok: true };
     } catch (error) { return { error: error.message }; }
   },
