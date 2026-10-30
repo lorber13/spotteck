@@ -38,7 +38,7 @@ async function exchange(params) {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(params), signal: AbortSignal.timeout(15000)
   });
-  if (!res.ok) throw new Error('Accesso Spotify non riuscito. Ripeti il login.');
+  if (!res.ok) throw Object.assign(new Error('Accesso Spotify non riuscito. Ripeti il login.'), { status: res.status });
   const data = await res.json();
   if (!data.access_token) throw new Error('Spotify non ha restituito un accesso valido.');
   return data;
@@ -55,7 +55,14 @@ async function token(force = false) {
   if (!refreshing) {
     const epoch = generation;
     refreshing = (async () => {
-      const data = await exchange({ grant_type: 'refresh_token', refresh_token: current.refreshToken, client_id: current.clientId });
+      let data;
+      try {
+        data = await exchange({ grant_type: 'refresh_token', refresh_token: current.refreshToken, client_id: current.clientId });
+      } catch (error) {
+        // Revoked or expired grant: forget the tokens so callers stop retrying and the user can log in again.
+        if (generation === epoch && [400, 401].includes(error.status)) save({ clientId: current.clientId });
+        throw error;
+      }
       if (generation !== epoch) return null;
       save({ ...current, accessToken: data.access_token, refreshToken: data.refresh_token || current.refreshToken,
         expiresAt: Date.now() + data.expires_in * 1000 });

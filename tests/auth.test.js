@@ -79,3 +79,43 @@ test('PKCE login validates state, encrypts tokens, refreshes once and persists l
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('a rejected refresh token ends the session instead of retrying on every poll', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'spotteck-auth-'));
+  const xor = (bytes) => Buffer.from(bytes).map((byte) => byte ^ 42);
+  const id = 'b'.repeat(32);
+  fs.writeFileSync(path.join(directory, 'spotify-session.json'), JSON.stringify({ encrypted: xor(Buffer.from(JSON.stringify({
+    clientId: id, accessToken: 'expired', refreshToken: 'revoked', expiresAt: 0 }))).toString('base64') }));
+  let reply;
+  const exchanges = [];
+  const load = () => {
+    const context = {
+      require(name) {
+        if (name === 'electron') return { app: { getPath: () => directory, isReady: () => true }, shell: {},
+          safeStorage: { isEncryptionAvailable: () => true, encryptString: xor, decryptString: (bytes) => xor(bytes).toString() } };
+        if (name === './spotify-config.json') return { clientId: 'a'.repeat(32) };
+        return require(name);
+      },
+      module: { exports: {} }, process: { env: {} }, URL, URLSearchParams, Buffer, AbortSignal, setTimeout, clearTimeout,
+      fetch: async (_url, opts) => { exchanges.push(Object.fromEntries(opts.body)); return reply(); }
+    };
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/spotify-auth.js'), 'utf8'), context);
+    return context.module.exports;
+  };
+  try {
+    const auth = load();
+    reply = () => { throw new Error('offline'); };
+    await assert.rejects(auth.token());
+    assert.equal(auth.hasSession(), true, 'a network error keeps the session');
+    reply = () => ({ ok: false, status: 400, json: async () => ({ error: 'invalid_grant' }) });
+    await assert.rejects(auth.token());
+    assert.equal(auth.hasSession(), false);
+    assert.equal(await auth.token(), null);
+    assert.equal(exchanges.length, 2, 'no further refresh attempts');
+    const restarted = load();
+    assert.equal(restarted.hasSession(), false);
+    assert.equal(restarted.clientId(), id, 'the client id survives');
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

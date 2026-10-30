@@ -174,7 +174,11 @@ async function refreshSpotifyAccessToken() {
 
 async function getAccessToken() {
   if (Auth.hasSession()) {
-    try { return await Auth.token(); } catch (_) { return null; }
+    try { return await Auth.token(); } catch (_) {
+      // Spotify rejected the session: show it as signed out and re-pick the mode on the next control.
+      if (!Auth.hasSession()) { account = null; accountCheckedAt = 0; }
+      return null;
+    }
   }
   if (!allowLegacyCredentials) return null;
   if (cachedAccessToken && Date.now() < tokenExpiresAt - 60000) {

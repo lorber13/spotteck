@@ -9,7 +9,12 @@ const { PremiumPlayer } = require('../src/premium-player');
 
 function controller(product, options = {}) {
   const calls = { desktop: [], premium: [], api: [], stops: 0 };
-  const auth = { hasSession: () => true, loggedOut: () => false, token: async () => 'test-token',
+  let session = true;
+  const auth = { hasSession: () => session, loggedOut: () => false,
+    token: async () => {
+      if (options.revoked?.()) { session = false; throw new Error('Accesso Spotify non riuscito.'); }
+      return 'test-token';
+    },
     clientId: () => 'a'.repeat(32), login: async () => {}, logout() {}, cancel() {} };
   const app = { getPath: () => '/tmp/spotteck-test', isPackaged: false };
   const context = {
@@ -250,4 +255,18 @@ test('a rejected account check signs out of Premium', async () => {
   assert.equal(api.snapshot().playbackMode, 'desktop');
   assert.ok(calls.stops > 0);
   assert.equal((await api.getProfile()).profile.product, 'Piano non verificato · Spotify Desktop');
+});
+
+test('a revoked Spotify login shows as signed out right away', async () => {
+  let revoked = false;
+  const { api } = controller('premium', { revoked: () => revoked });
+  await api.init(null);
+  await new Promise(setImmediate);
+  assert.equal((await api.getProfile()).authenticated, true);
+  revoked = true;
+  await api.getPlayerState();
+  assert.equal(api.snapshot().authenticated, false);
+  assert.equal((await api.getProfile()).authenticated, false);
+  await api.playPause();
+  assert.equal(api.snapshot().playbackMode, 'desktop');
 });
