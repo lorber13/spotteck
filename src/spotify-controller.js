@@ -380,23 +380,27 @@ function getPlayerStateSync() {
 }
 
 const PLAYLIST_RETRY_MS = 30 * 1000;
-let savedContext = { trackUri: null, contextUri: '', retryAt: 0 };
+let savedContext = { trackUri: null, preferred: '', contextUri: '', retryAt: 0 };
 
 // The saved playlist that contains trackUri, '' if none does, or null if the account changed meanwhile.
-// Remembered per track; if a playlist failed to load, it is looked up again after 30 s.
-async function savedPlaylistContext(trackUri, epoch) {
-  if (savedContext.trackUri === trackUri && Date.now() < savedContext.retryAt) return savedContext.contextUri;
+// `preferred` is checked first. Remembered per track; a failed playlist load is retried after 30 s.
+async function savedPlaylistContext(trackUri, epoch, preferred = '') {
+  if (savedContext.trackUri === trackUri && savedContext.preferred === preferred && Date.now() < savedContext.retryAt) {
+    return savedContext.contextUri;
+  }
   let contextUri = '';
   let complete = true;
+  const isPreferred = (pl) => preferred && (toUri(pl.id, 'playlist') || pl.id) === preferred;
   try {
-    for (const pl of PlaylistsStore.getPlaylists()) {
+    const saved = PlaylistsStore.getPlaylists();
+    for (const pl of [...saved.filter(isPreferred), ...saved.filter((pl) => !isPreferred(pl))]) {
       const tracksRes = await PlaylistsStore.fetchPlaylistTracks(pl.id);
       if (epoch !== accountGeneration) return null;
       if (!tracksRes?.success) { complete = false; continue; }
       if (tracksRes.tracks?.some((t) => t.uri === trackUri)) { contextUri = toUri(pl.id, 'playlist') || pl.id; break; }
     }
   } catch (_e) { complete = false; }
-  savedContext = { trackUri, contextUri, retryAt: complete || contextUri ? Infinity : Date.now() + PLAYLIST_RETRY_MS };
+  savedContext = { trackUri, preferred, contextUri, retryAt: complete || contextUri ? Infinity : Date.now() + PLAYLIST_RETRY_MS };
   return contextUri;
 }
 
@@ -457,12 +461,8 @@ async function pollSpotifyState() {
       if (typeof d.shuffle_state === 'boolean') {
         state.shuffling = d.shuffle_state;
       }
+      // Without a context from Spotify, fall back to the saved playlist that contains the track.
       state.contextUri = d.context?.uri || '';
-      if (d.context && d.context.uri) {
-        state.contextUri = d.context.uri;
-      }
-
-      // If contextUri is missing, match against saved playlists (only once per track change)
       if (!state.contextUri && state.trackUri) {
         const match = await savedPlaylistContext(state.trackUri, epoch);
         if (match === null) return;
@@ -507,10 +507,12 @@ async function pollSpotifyState() {
       state.album = cAlbum;
       state.duration = Math.round(cDurMs / 1000);
       if (cArt) state.artwork = cArt;
+      const trackChanged = !!cId && cId !== state.trackUri;
       if (cId) state.trackUri = cId;
 
-      if (!state.contextUri && state.trackUri) {
-        const match = await savedPlaylistContext(state.trackUri, epoch);
+      // AppleScript never reports the context: re-derive it per track, keeping the current playlist if it still applies.
+      if (trackChanged || (!state.contextUri && state.trackUri)) {
+        const match = await savedPlaylistContext(state.trackUri, epoch, state.contextUri);
         if (match === null) return;
         state.contextUri = match;
       }

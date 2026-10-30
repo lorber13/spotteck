@@ -330,3 +330,19 @@ test('a failed playlist load is retried after 30 s, not on every poll', async ()
   clock.now += 31 * 1000;
   assert.equal((await api.getPlayerState()).contextUri, 'spotify:playlist:saved');
 });
+
+test('desktop playback re-derives the playlist when the track changes', async () => {
+  const raw = (uri) => ['playing', '10', '50', 'false', 'Track', 'Artist', 'Album', '100000', '', uri].join('\0');
+  const playlists = { 'spotify:playlist:other': ['spotify:track:shared'], 'spotify:playlist:mine': ['spotify:track:mine', 'spotify:track:shared'] };
+  const options = { playerFails: true, rawState: raw('spotify:track:mine'),
+    playlists: Object.keys(playlists).map((id) => ({ id })),
+    fetchTracks: (id) => ({ success: true, tracks: playlists[id].map((uri) => ({ uri })) }) };
+  const { api } = controller('free', options);
+  await api.init(null);
+  await new Promise(setImmediate);
+  assert.equal((await api.getPlayerState()).contextUri, 'spotify:playlist:mine');
+  options.rawState = raw('spotify:track:shared');
+  assert.equal((await api.getPlayerState()).contextUri, 'spotify:playlist:mine', 'the current playlist wins when both contain the track');
+  options.rawState = raw('spotify:track:standalone');
+  assert.equal((await api.getPlayerState()).contextUri, '', 'a track outside every saved playlist clears the highlight');
+});
