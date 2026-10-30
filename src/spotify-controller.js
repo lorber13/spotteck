@@ -566,17 +566,8 @@ const SpotifyController = {
 
     // 2. Fallback to AppleScript
     try {
-      await runOsa(`
-        tell application "Spotify" to playpause
-        tell application "System Events"
-          try
-            tell process "Spotify"
-              set value of attribute "AXFullScreen" of window 1 to false
-            end try
-            set visible of (every process whose bundle identifier is "com.spotify.client") to false
-          end try
-        end tell
-      `);
+      await runOsa('tell application "Spotify" to playpause');
+      await hideSpotify();
       refocusApp();
     } catch (_e) {}
     setTimeout(pollSpotifyState, 140);
@@ -599,17 +590,8 @@ const SpotifyController = {
 
     // 2. Fallback to AppleScript
     try {
-      await runOsa(`
-        tell application "Spotify" to next track
-        tell application "System Events"
-          try
-            tell process "Spotify"
-              set value of attribute "AXFullScreen" of window 1 to false
-            end try
-            set visible of (every process whose bundle identifier is "com.spotify.client") to false
-          end try
-        end tell
-      `);
+      await runOsa('tell application "Spotify" to next track');
+      await hideSpotify();
       refocusApp();
     } catch (_e) {}
     setTimeout(pollSpotifyState, 140);
@@ -632,17 +614,8 @@ const SpotifyController = {
 
     // 2. Fallback to AppleScript
     try {
-      await runOsa(`
-        tell application "Spotify" to previous track
-        tell application "System Events"
-          try
-            tell process "Spotify"
-              set value of attribute "AXFullScreen" of window 1 to false
-            end try
-            set visible of (every process whose bundle identifier is "com.spotify.client") to false
-          end try
-        end tell
-      `);
+      await runOsa('tell application "Spotify" to previous track');
+      await hideSpotify();
       refocusApp();
     } catch (_e) {}
     setTimeout(pollSpotifyState, 140);
@@ -735,19 +708,8 @@ const SpotifyController = {
 
     // 2. Fallback to AppleScript
     try {
-      await runOsa(`
-        tell application "Spotify"
-          play track "${uri}"
-        end tell
-        tell application "System Events"
-          try
-            tell process "Spotify"
-              set value of attribute "AXFullScreen" of window 1 to false
-            end tell
-            set visible of (every process whose bundle identifier is "com.spotify.client") to false
-          end try
-        end tell
-      `);
+      await runOsa(`tell application "Spotify" to play track "${uri}"`);
+      await hideSpotify();
       refocusApp();
       setTimeout(pollSpotifyState, 200);
       return { ok: true };
@@ -792,34 +754,11 @@ const SpotifyController = {
     // 2. Fallback to AppleScript
     try {
       if (contextUri && trackUri) {
-        await runOsa(`
-          tell application "Spotify"
-            play track "${trackUri}" in context "${contextUri}"
-          end tell
-          tell application "System Events"
-            try
-              tell process "Spotify"
-                set value of attribute "AXFullScreen" of window 1 to false
-              end tell
-              set visible of (every process whose bundle identifier is "com.spotify.client") to false
-            end try
-          end tell
-        `);
+        await runOsa(`tell application "Spotify" to play track "${trackUri}" in context "${contextUri}"`);
       } else if (trackUri) {
-        await runOsa(`
-          tell application "Spotify"
-            play track "${trackUri}"
-          end tell
-          tell application "System Events"
-            try
-              tell process "Spotify"
-                set value of attribute "AXFullScreen" of window 1 to false
-              end tell
-              set visible of (every process whose bundle identifier is "com.spotify.client") to false
-            end try
-          end tell
-        `);
+        await runOsa(`tell application "Spotify" to play track "${trackUri}"`);
       }
+      await hideSpotify();
       refocusApp();
       setTimeout(pollSpotifyState, 200);
       return { ok: true };

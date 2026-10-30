@@ -49,6 +49,9 @@ function controller(product, options = {}) {
       const endpoint = new URL(url).pathname;
       calls.api.push({ endpoint, opts });
       if (endpoint === '/v1/me/player' && options.playerFails) return { status: 500, ok: false, text: async () => '{}' };
+      if (options.commandsFail && endpoint.startsWith('/v1/me/player/') && opts.method !== 'GET') {
+        return { status: 403, ok: false, text: async () => '{"error":{"reason":"PREMIUM_REQUIRED"}}' };
+      }
       let data = endpoint === '/v1/me' ? { product, display_name: 'Test' } :
         (options.playerData?.() || { device: { id: 'our-device' }, is_playing: false });
       return { status: 200, ok: true, text: async () => JSON.stringify(data) };
@@ -156,4 +159,31 @@ test('logout discards an outstanding desktop state reply', async () => {
   const state = api.snapshot();
   assert.equal(state.track, 'Spotteck');
   assert.equal(state.isPlaying, false);
+});
+
+// osascript rejects a script whose blocks do not close in order; the fallbacks swallow that error.
+function unbalancedAppleScript(script) {
+  const open = [];
+  for (const line of script.split('\n').map((l) => l.trim()).filter(Boolean)) {
+    const end = line.match(/^end (tell|try|if)\b/);
+    if (end) { if (open.pop() !== end[1]) return line; }
+    else if (/^tell\b/.test(line) && !/\bto\b/.test(line)) open.push('tell');
+    else if (line === 'try') open.push('try');
+    else if (/^if\b.*\bthen$/.test(line)) open.push('if');
+  }
+  return open.length ? `unclosed ${open.at(-1)}` : null;
+}
+
+test('desktop AppleScript fallbacks are well formed', async () => {
+  const { api, calls } = controller('free', { commandsFail: true });
+  await api.init(null);
+  for (const [method, args] of [['playPause', []], ['nextTrack', []], ['prevTrack', []],
+    ['playUri', ['spotify:playlist:abc']], ['playTrackInContext', ['spotify:track:abc', 'spotify:playlist:def']],
+    ['playTrackInContext', ['spotify:track:abc', '']]]) {
+    calls.desktop.length = 0;
+    await api[method](...args);
+    const scripts = calls.desktop.filter((call) => call.file === 'osascript').map((call) => call.args[1]);
+    assert.ok(scripts.some((s) => /tell application "Spotify"/.test(s) && !/player state/.test(s)), `${method} reaches Spotify`);
+    for (const script of scripts) assert.equal(unbalancedAppleScript(script), null, `${method}:\n${script}`);
+  }
 });
