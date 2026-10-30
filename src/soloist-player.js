@@ -57,14 +57,7 @@ class SoloistPlayer extends PremiumPlayer {
   }
 
   async startPairing() {
-    const previous = this.child;
-    this.stop();
-    if (previous && previous.exitCode === null && previous.signalCode === null) {
-      await new Promise(resolve => {
-        const timer = setTimeout(resolve, 1700);
-        previous.once('exit', () => { clearTimeout(timer); resolve(); });
-      });
-    }
+    await this.stopAndWait();
     this.pairing = true;
     await this.start();
   }

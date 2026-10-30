@@ -60,8 +60,21 @@ class PremiumPlayer {
     }
   }
 
-  clearCredentials() {
+  // Resolves once the stopped process has exited; stop() sends SIGKILL after 1.5 s.
+  async stopAndWait(timeout = 1700) {
+    const child = this.child;
     this.stop();
+    if (child && child.exitCode === null && child.signalCode === null) {
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, timeout);
+        child.once('exit', () => { clearTimeout(timer); resolve(); });
+      });
+    }
+  }
+
+  // Wait for the exit first: a graceful shutdown can write the session back to the data dir.
+  async clearCredentials() {
+    await this.stopAndWait();
     if (this.cacheDir) fs.rmSync(this.cacheDir, { recursive: true, force: true });
   }
 }

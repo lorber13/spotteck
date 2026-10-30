@@ -805,7 +805,7 @@ const SpotifyController = {
     premium.stop();
     try {
       await Auth.login(clientId);
-      premium.clearCredentials();
+      await premium.clearCredentials();
       cachedAccessToken = null;
       cachedRefreshToken = null;
       cachedDisplayName = '';
@@ -847,7 +847,7 @@ const SpotifyController = {
 
   async logout() {
     accountGeneration++;
-    premium.clearCredentials();
+    await premium.clearCredentials();
     Auth.logout();
     SoloistSettings.clear();
     allowLegacyCredentials = false;

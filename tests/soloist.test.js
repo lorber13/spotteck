@@ -138,3 +138,30 @@ test('a Soloist crash message does not outlive stop()', async () => {
     assert.equal(player.error, '', 'logout or a switch to desktop mode must not keep showing the crash');
   } finally { player.stop(); fs.rmSync(cacheDir, { recursive: true, force: true }); }
 });
+
+test('logout deletes Soloist credentials only after the process has exited', async () => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'soloist-clear-test-'));
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.signalCode = null;
+  // Like the real engine, a graceful shutdown flushes its session to --data-dir before exiting.
+  child.kill = (signal) => {
+    if (signal !== 'SIGTERM') return;
+    setImmediate(() => {
+      fs.mkdirSync(cacheDir, { recursive: true });
+      fs.writeFileSync(path.join(cacheDir, 'credentials.json'), '{"private":"session"}');
+      child.signalCode = 'SIGTERM';
+      child.emit('exit', null, 'SIGTERM');
+    });
+  };
+  const player = new SoloistPlayer({ binary: process.execPath, cacheDir, installationId: 'test', readKey: () => 'personal-secret',
+    spawnProcess: () => child, sleep: async () => {},
+    request: async () => ({ ok: true, data: { devices: [{ name: player.name, id: 'soloist-device', is_active: true }] } }) });
+  try {
+    await player.start();
+    await player.clearCredentials();
+    await new Promise(setImmediate); // let any pending shutdown write land
+    assert.equal(player.child, null);
+    assert.equal(fs.existsSync(cacheDir), false, 'credentials written during shutdown must not survive logout');
+  } finally { player.stop(); fs.rmSync(cacheDir, { recursive: true, force: true }); }
+});
