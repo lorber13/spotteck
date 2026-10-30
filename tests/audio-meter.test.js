@@ -28,6 +28,13 @@ test('audio meter captures only the player, bounds frames and stops on player ch
   const before = events.length;
   child.stdout.emit('data', 'x'.repeat(40000));
   assert.equal(events.length, before);
+  child.stdout.emit('data', '\n'); // end the oversized junk line
+  // A busy main process receives many queued frames in one chunk; none may be dropped.
+  const burst = (JSON.stringify(frame) + '\n').repeat(16);
+  assert.ok(burst.length > 32768);
+  child.stdout.emit('data', burst.slice(0, -100));
+  child.stdout.emit('data', burst.slice(-100));
+  assert.equal(events.filter(([channel]) => channel === 'audio:frame').length, 17);
   child.stderr.emit('data', 'Audio analysis unavailable (-1)\n');
   assert.match(events.at(-1)[1], /codice -1/);
   pid = null;

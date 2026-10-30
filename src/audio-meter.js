@@ -25,7 +25,6 @@ class AudioMeter {
       child.stdout.on('data', chunk => {
         if (this.child !== child) return;
         buffer += chunk.toString();
-        if (buffer.length > 32768) { buffer = ''; return; }
         let newline;
         while ((newline = buffer.indexOf('\n')) >= 0) {
           const line = buffer.slice(0, newline);
@@ -42,6 +41,8 @@ class AudioMeter {
             }
           } catch (_) {}
         }
+        // Only an unterminated line is bounded; complete frames above were already delivered.
+        if (buffer.length > 32768) buffer = '';
       });
       const ended = () => {
         if (this.child !== child) return;
