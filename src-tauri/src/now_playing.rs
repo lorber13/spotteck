@@ -1,24 +1,21 @@
-//! macOS Now Playing and the hardware media keys (F7/F8/F9, headphones, Control Center).
+//! The system media controls and the hardware media keys: Now Playing on macOS
+//! (F7/F8/F9, headphones, Control Center), MPRIS on Linux, SMTC on Windows.
 
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig};
 use spotteck_core::state::Payload;
 use spotteck_spotify::Engine;
 use std::cell::RefCell;
 use std::time::Duration;
-use tauri::{AppHandle, Runtime};
+use tauri::{App, AppHandle, Runtime};
 
 thread_local! {
     // MediaControls is bound to the main thread on macOS.
     static CONTROLS: RefCell<Option<MediaControls>> = const { RefCell::new(None) };
 }
 
-/// Call from the main thread during setup. Spotteck targets macOS; other platforms
-/// (used only to build and test) skip it.
-pub fn install(engine: Engine) {
-    if !cfg!(target_os = "macos") {
-        return;
-    }
-    let config = PlatformConfig { display_name: "Spotteck", dbus_name: "spotteck", hwnd: None };
+/// Call from the main thread during setup.
+pub fn install<R: Runtime>(app: &App<R>, engine: Engine) {
+    let config = PlatformConfig { display_name: "Spotteck", dbus_name: "spotteck", hwnd: window_handle(app) };
     let mut controls = match MediaControls::new(config) {
         Ok(controls) => controls,
         Err(e) => return log::warn!("Now Playing unavailable: {e:?}"),
@@ -41,6 +38,19 @@ pub fn install(engine: Engine) {
         return log::warn!("Media keys unavailable: {e:?}");
     }
     CONTROLS.with(|c| *c.borrow_mut() = Some(controls));
+}
+
+/// Windows ties the media controls to a window.
+#[cfg(target_os = "windows")]
+fn window_handle<R: Runtime>(app: &App<R>) -> Option<*mut std::ffi::c_void> {
+    use tauri::Manager;
+    let hwnd = app.get_webview_window("main")?.hwnd().ok()?;
+    Some(hwnd.0 as *mut std::ffi::c_void)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn window_handle<R: Runtime>(_app: &App<R>) -> Option<*mut std::ffi::c_void> {
+    None
 }
 
 /// Mirrors the player state into Now Playing. Safe to call from any thread.

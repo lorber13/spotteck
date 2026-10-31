@@ -29,12 +29,25 @@ fn device_id(dir: &Path) -> String {
     id
 }
 
+/// The name the user gave this computer (System Settings → General → About on macOS).
+#[cfg(target_os = "macos")]
+fn computer_name() -> Option<String> {
+    let output = std::process::Command::new("scutil").args(["--get", "ComputerName"]).output().ok()?;
+    String::from_utf8(output.stdout).ok()
+}
+
+#[cfg(target_os = "windows")]
+fn computer_name() -> Option<String> {
+    std::env::var("COMPUTERNAME").ok()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn computer_name() -> Option<String> {
+    std::fs::read_to_string("/proc/sys/kernel/hostname").or_else(|_| std::fs::read_to_string("/etc/hostname")).ok()
+}
+
 fn device_name() -> String {
-    std::process::Command::new("scutil")
-        .args(["--get", "ComputerName"])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
+    computer_name()
         .map(|n| n.trim().to_owned())
         .filter(|n| !n.is_empty())
         .map(|n| format!("Spotteck · {n}"))
@@ -112,7 +125,7 @@ fn main() {
                 tap: tap.clone(),
             });
 
-            now_playing::install(engine.clone());
+            now_playing::install(app, engine.clone());
             start_analyzer(handle.clone(), tap);
             start_heartbeat(handle.clone(), engine.clone());
             let starting = engine.clone();

@@ -8,7 +8,7 @@
 <body>
   <main id="faceplate" class="faceplate">
     <div class="anodized-grain"></div>
-    <!-- Drag strip only: the traffic lights are the native macOS ones -->
+    <!-- Drag strip only: macOS draws its native traffic lights over it; Linux and Windows keep their title bar -->
     <div class="drag-strip" data-tauri-drag-region></div>
 
     <!-- Top-Right Fullscreen / Hide Playlists Toggle Button -->
@@ -242,7 +242,7 @@
               <button id="profileLogoutBtn" class="key key-wide">Disconnetti</button>
             </div>
             <p id="spotifyStatus" class="settings-hint" role="status" aria-live="polite"></p>
-            <p id="playerHint" class="settings-hint">Spotteck suona come dispositivo Spotify Connect: lo trovi anche nel menu Dispositivi dell’app Spotify sul telefono. Uscita: predefinita di macOS.</p>
+            <p id="playerHint" class="settings-hint">Spotteck suona come dispositivo Spotify Connect: lo trovi anche nel menu Dispositivi dell’app Spotify sul telefono. Uscita: predefinita del sistema.</p>
             <p id="audioAnalysisStatus" class="settings-hint" role="status">Visualizzatori: in attesa dell’audio reale.</p>
           </div>
         </div>

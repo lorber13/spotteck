@@ -1,4 +1,5 @@
-//! The reusable Spotify login, kept in the macOS Keychain. It is never logged.
+//! The reusable Spotify login, kept in the system keychain (macOS Keychain, Windows
+//! Credential Manager, Secret Service on Linux). It is never logged.
 
 use spotteck_spotify::CredentialStore;
 

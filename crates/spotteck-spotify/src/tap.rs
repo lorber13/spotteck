@@ -1,4 +1,4 @@
-//! Copies the PCM librespot sends to CoreAudio so the visualizers analyze exactly what
+//! Copies the PCM librespot sends to the audio output so the visualizers analyze exactly what
 //! is playing. Nothing is recorded and no input device is opened.
 
 use librespot_playback::audio_backend::{Sink, SinkResult};
@@ -85,7 +85,7 @@ impl AudioTap {
     }
 }
 
-/// The CoreAudio sink with a copy of every packet going to the [`AudioTap`].
+/// The rodio sink with a copy of every packet going to the [`AudioTap`].
 pub(crate) struct TeeSink {
     inner: Box<dyn Sink>,
     tap: Arc<AudioTap>,

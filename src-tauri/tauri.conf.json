@@ -32,7 +32,7 @@
     "targets": ["app", "dmg"],
     "category": "Music",
     "shortDescription": "Spotify Premium in stile Braun, con visualizzatori analogici",
-    "icon": ["../build/icon.png", "../build/icon.icns"],
+    "icon": ["../build/icon.png", "../build/icon.icns", "../build/icon.ico"],
     "macOS": {
       "minimumSystemVersion": "14.2"
     }

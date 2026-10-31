@@ -7,8 +7,10 @@
   "scripts": {
     "test": "cargo test --workspace && node --test tests/*.test.js",
     "start": "tauri dev",
-    "pack": "tauri build --target aarch64-apple-darwin --bundles app",
-    "dist": "tauri build --target aarch64-apple-darwin",
+    "pack": "tauri build --no-bundle",
+    "dist": "tauri build",
+    "pack:mac": "tauri build --target aarch64-apple-darwin --bundles app",
+    "dist:mac": "tauri build --target aarch64-apple-darwin",
     "check:ui": "node tools/check-ui.js",
     "tauri": "tauri"
   },

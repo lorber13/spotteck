@@ -5,7 +5,7 @@
 Una nuova interfaccia per Spotify più bella, essenziale ed elegante.  
 Elimina il disordine dell'app ufficiale e trasforma l'ascolto in un lettore compatto con visualizzatori analogici (oscilloscopio, cassetta, VU meter, vinile, fluido Aether).
 
-**Requisiti:** Mac Apple Silicon con macOS 14.2 o successivo e un account **Spotify Premium**. Spotteck suona da solo: non serve l’app Spotify sul Mac.
+**Requisiti:** un account **Spotify Premium** e macOS 14.2+ (Apple Silicon), Linux o Windows 10/11. Spotteck suona da solo: non serve l’app Spotify sul computer. Per compilarlo su ciascun sistema vedi [**SETUP_GUIDE.md**](SETUP_GUIDE.md#sviluppo).
 
 ---
 
