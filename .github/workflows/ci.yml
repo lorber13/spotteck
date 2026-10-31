@@ -85,7 +85,25 @@ jobs:
           cache: npm
       - run: npm ci
       # Bundles from tauri.conf.json plus tauri.<platform>.conf.json: .app/.dmg, .deb/.AppImage, NSIS .exe.
-      - run: npm run dist
+      # The .app is ad-hoc signed (bundle.macOS.signingIdentity "-") unless the repository defines the
+      # Apple secrets: then Tauri signs it with the Developer ID and notarizes it.
+      - name: npm run dist
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Undefined secrets arrive as empty strings: an empty APPLE_SIGNING_IDENTITY would replace "-".
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!v}" ] || unset "$v"
+          done
+          npm run dist
+      - if: runner.os == 'macOS'
+        run: codesign --verify --deep --strict --verbose=2 target/release/bundle/macos/Spotteck.app
       - uses: actions/upload-artifact@v4
         with:
           name: spotteck-${{ runner.os }}

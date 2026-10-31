@@ -14,7 +14,13 @@ Spotteck riproduce l’audio da solo, come dispositivo Spotify Connect. Non serv
 
 ## Installare
 
-- **macOS:** apri il DMG e trascina Spotteck in Applicazioni. Il pacchetto locale non è notarizzato Apple: al primo avvio usa clic destro → Apri.
+- **macOS:** apri il DMG e trascina Spotteck in Applicazioni. Il pacchetto non è notarizzato Apple, quindi al primo avvio macOS lo blocca: apri **Impostazioni di Sistema → Privacy e sicurezza**, scorri fino a «Spotteck è stato bloccato» e premi **Apri comunque** (su macOS 14 basta anche clic destro → Apri). Se macOS dice invece che **Spotteck è danneggiato e non può essere aperto**, il file non è rotto: è un pacchetto scaricato senza firma (le build precedenti a questa correzione). Rimuovi la quarantena dal Terminale e riaprilo:
+
+  ```
+  xattr -dr com.apple.quarantine /Applications/Spotteck.app
+  ```
+
+  Se il messaggio resta, firma la copia locale con `codesign --force --deep --sign - /Applications/Spotteck.app`.
 - **Linux:** installa il `.deb` (`sudo apt install ./Spotteck_*.deb`) oppure rendi eseguibile l’`.AppImage` e avvialo.
 - **Windows:** avvia l’installer `Spotteck_*-setup.exe`. Non è firmato: SmartScreen può chiedere conferma (Ulteriori informazioni → Esegui comunque).
 
@@ -53,7 +59,7 @@ npm run pack:mac     # Spotteck.app per Apple Silicon
 npm run dist:mac     # .app + .dmg per Apple Silicon
 ```
 
-I pacchetti finiscono in `target/release/bundle/`. Ogni push esegue la CI di GitHub Actions (`.github/workflows/ci.yml`): formattazione, clippy, test su macOS, Linux e Windows e prova dell’interfaccia; su `main`, sui tag `v*` e con avvio manuale costruisce anche i pacchetti delle tre piattaforme e li allega come artefatti.
+I pacchetti finiscono in `target/release/bundle/`. Su macOS `Spotteck.app` è firmata ad-hoc (`signingIdentity: "-"`): basta per avviarla su Apple Silicon, ma Gatekeeper chiede conferma al primo avvio. Per una build firmata e notarizzata servono un certificato Developer ID e, nei secret del repository, `APPLE_CERTIFICATE` (il `.p12` in base64), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` (password specifica per app) e `APPLE_TEAM_ID`: la CI li passa a Tauri, che firma e notarizza. Ogni push esegue la CI di GitHub Actions (`.github/workflows/ci.yml`): formattazione, clippy, test su macOS, Linux e Windows e prova dell’interfaccia; su `main`, sui tag `v*` e con avvio manuale costruisce anche i pacchetti delle tre piattaforme e li allega come artefatti.
 
 Il codice Rust è diviso in:
 

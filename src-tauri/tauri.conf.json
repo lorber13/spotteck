@@ -34,7 +34,8 @@
     "shortDescription": "Spotify Premium in stile Braun, con visualizzatori analogici",
     "icon": ["../build/icon.png", "../build/icon.icns", "../build/icon.ico"],
     "macOS": {
-      "minimumSystemVersion": "14.2"
+      "minimumSystemVersion": "14.2",
+      "signingIdentity": "-"
     }
   }
 }
