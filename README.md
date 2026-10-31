@@ -3,9 +3,9 @@
 > 🤖 **Per configurare tutto con un agente AI (Codex, Antigravity, ecc.):** dai questo file e il progetto 👉 [**SETUP_GUIDE.md**](SETUP_GUIDE.md)
 
 Una nuova interfaccia per Spotify più bella, essenziale ed elegante.  
-Elimina il disordine dell'app ufficiale e trasforma l'ascolto in un lettore compatto con visualizzatori analogici (oscilloscopio, cassetta, VU meter, vinile, fluido Aether).
+Elimina il disordine dell'app ufficiale e trasforma l'ascolto in un telecomando compatto con visualizzatori analogici (oscilloscopio, cassetta, VU meter, vinile, fluido Aether).
 
-**Requisiti:** un account **Spotify Premium** e macOS 14.2+ (Apple Silicon), Linux o Windows 10/11. Spotteck suona da solo: non serve l’app Spotify sul computer. Per compilarlo su ciascun sistema vedi [**SETUP_GUIDE.md**](SETUP_GUIDE.md#sviluppo).
+**Requisiti:** un account **Spotify Premium**, l’app Spotify ufficiale (sul computer, sul telefono o su un altoparlante) e macOS 14.2+ (Apple Silicon), Linux o Windows 10/11. Spotteck usa solo le API ufficiali di Spotify: crea la tua app gratuita su Spotify for Developers e incolla il Client ID nelle Impostazioni ([**guida**](SETUP_GUIDE.md#creare-la-tua-app-spotify-client-id)). Per compilarlo vedi [**SETUP_GUIDE.md**](SETUP_GUIDE.md#sviluppo).
 
 ---
 
