@@ -15,8 +15,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Packages Tauri (WebKitGTK), librespot (ALSA, OpenSSL) and keyring (D-Bus) link against on Linux.
-  LINUX_DEPS: libwebkit2gtk-4.1-dev libasound2-dev libssl-dev libdbus-1-dev librsvg2-dev file
+  # Packages Tauri (WebKitGTK, OpenSSL), the visualizer capture (PipeWire, bindgen needs libclang) and
+  # keyring (D-Bus) link against on Linux.
+  LINUX_DEPS: libwebkit2gtk-4.1-dev libpipewire-0.3-dev libclang-dev libssl-dev libdbus-1-dev librsvg2-dev file
 
 jobs:
   lint:

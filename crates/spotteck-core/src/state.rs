@@ -4,7 +4,7 @@ use crate::readiness::Readiness;
 use serde::Serialize;
 use std::time::Instant;
 
-/// One change reported by the playback engine, already stripped of librespot types.
+/// One change read from the Web API's playback state (or applied after a command).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Update {
     Track {
@@ -26,9 +26,12 @@ pub enum Update {
     },
     Stopped,
     Shuffle(bool),
-    /// librespot volume, 0..=65535.
-    Volume(u16),
+    /// Volume of the playing device, 0–100.
+    Volume(u8),
     Context(String),
+    /// Name of the Spotify Connect device that is playing (Spotify on this computer, a
+    /// phone, a speaker…).
+    Device(String),
     Error(String),
 }
 
@@ -47,7 +50,8 @@ pub struct PlayerState {
     position_ms: u32,
     position_at: Option<Instant>,
     pub shuffling: bool,
-    pub volume: u16,
+    pub volume: u8,
+    pub device: String,
     pub playback_error: Option<String>,
 }
 
@@ -67,7 +71,8 @@ impl Default for PlayerState {
             position_ms: 0,
             position_at: None,
             shuffling: false,
-            volume: u16::MAX,
+            volume: 100,
+            device: String::new(),
             playback_error: None,
         }
     }
@@ -89,18 +94,19 @@ pub struct Payload {
     pub track_uri: String,
     pub context_uri: String,
     pub volume: u8,
+    pub device: String,
     pub authenticated: bool,
     pub readiness: Readiness,
     pub playback_error: Option<String>,
 }
 
-pub fn volume_to_percent(volume: u16) -> u8 {
-    ((u32::from(volume) * 100 + u32::from(u16::MAX) / 2) / u32::from(u16::MAX)) as u8
-}
-
-pub fn percent_to_volume(percent: f64) -> u16 {
-    let percent = if percent.is_finite() { percent.clamp(0.0, 100.0) } else { 100.0 };
-    (percent / 100.0 * f64::from(u16::MAX)).round() as u16
+/// A slider value as the Web API's `volume_percent`.
+pub fn clamp_percent(percent: f64) -> u8 {
+    if percent.is_finite() {
+        percent.clamp(0.0, 100.0).round() as u8
+    } else {
+        100
+    }
 }
 
 impl PlayerState {
@@ -137,6 +143,7 @@ impl PlayerState {
             Update::Shuffle(shuffling) => self.shuffling = shuffling,
             Update::Volume(volume) => self.volume = volume,
             Update::Context(uri) => self.context_uri = uri,
+            Update::Device(name) => self.device = name,
             Update::Error(message) => {
                 self.playing = false;
                 self.playback_error = Some(message);
@@ -192,8 +199,9 @@ impl PlayerState {
             artwork: self.artwork.clone(),
             track_uri: self.track_uri.clone(),
             context_uri: self.context_uri.clone(),
-            volume: volume_to_percent(self.volume),
-            authenticated: !matches!(self.readiness, Readiness::SignedOut),
+            volume: self.volume,
+            device: if running { self.device.clone() } else { String::new() },
+            authenticated: !matches!(self.readiness, Readiness::SignedOut | Readiness::NeedsClientId),
             readiness: self.readiness.clone(),
             playback_error: self.playback_error.clone(),
         }
@@ -222,7 +230,8 @@ mod tests {
         let mut state = PlayerState { readiness: Readiness::Ready, ..Default::default() };
         state.apply(track(), now);
         state.apply(Update::Playing { position_ms: 61_500 }, now);
-        state.apply(Update::Volume(u16::MAX / 2), now);
+        state.apply(Update::Volume(50), now);
+        state.apply(Update::Device("Telefono".into()), now);
         let json = serde_json::to_value(state.payload(now)).unwrap();
         for key in [
             "isRunning",
@@ -237,6 +246,7 @@ mod tests {
             "trackUri",
             "contextUri",
             "volume",
+            "device",
             "authenticated",
             "readiness",
             "playbackError",
@@ -246,6 +256,7 @@ mod tests {
         assert_eq!(json["duration"], 200);
         assert_eq!(json["position"], 61);
         assert_eq!(json["volume"], 50);
+        assert_eq!(json["device"], "Telefono");
         assert_eq!(json["isPlaying"], true);
         assert_eq!(json["readiness"], "ready");
     }
@@ -280,12 +291,12 @@ mod tests {
         let mut state = PlayerState { readiness: Readiness::Ready, ..Default::default() };
         state.apply(track(), now);
         state.apply(Update::Shuffle(true), now);
-        state.apply(Update::Volume(1000), now);
+        state.apply(Update::Volume(30), now);
         state.apply(Update::Context("spotify:playlist:p".into()), now);
         state.apply(Update::Stopped, now);
         assert!(state.track_uri.is_empty() && !state.active);
         assert!(state.shuffling);
-        assert_eq!(state.volume, 1000);
+        assert_eq!(state.volume, 30);
         assert_eq!(state.context_uri, "spotify:playlist:p");
         assert_eq!(state.readiness, Readiness::Ready);
     }
@@ -304,13 +315,11 @@ mod tests {
     }
 
     #[test]
-    fn volume_conversions_round_trip() {
-        assert_eq!(volume_to_percent(0), 0);
-        assert_eq!(volume_to_percent(u16::MAX), 100);
-        for percent in 0..=100u8 {
-            assert_eq!(volume_to_percent(percent_to_volume(f64::from(percent))), percent);
-        }
-        assert_eq!(percent_to_volume(250.0), u16::MAX);
-        assert_eq!(percent_to_volume(f64::NAN), u16::MAX);
+    fn slider_values_become_percent() {
+        assert_eq!(clamp_percent(0.0), 0);
+        assert_eq!(clamp_percent(49.6), 50);
+        assert_eq!(clamp_percent(250.0), 100);
+        assert_eq!(clamp_percent(-3.0), 0);
+        assert_eq!(clamp_percent(f64::NAN), 100);
     }
 }

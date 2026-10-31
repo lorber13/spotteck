@@ -227,6 +227,24 @@
         </div>
 
         <div class="settings-section">
+          <div class="settings-label">App Spotify (Client ID)</div>
+          <div class="profile-well">
+            <p class="settings-hint">Spotteck usa solo le API ufficiali di Spotify con la tua app gratuita: creala nella dashboard Spotify for Developers (API: Web API), aggiungi questo Redirect URI e incolla qui il Client ID.</p>
+            <div class="client-row">
+              <code id="redirectUri" class="client-code">http://127.0.0.1:43821/callback</code>
+              <button id="copyRedirectBtn" class="key">Copia</button>
+            </div>
+            <label class="settings-label" for="clientIdInput">Client ID</label>
+            <input id="clientIdInput" class="modal-input client-input" type="text" inputmode="latin" maxlength="32" placeholder="32 caratteri, es. 0123456789abcdef0123456789abcdef" spellcheck="false" autocomplete="off">
+            <div class="profile-actions">
+              <button id="saveClientIdBtn" class="key key-orange key-wide">Salva</button>
+              <button id="openDashboardBtn" class="key key-wide">Apri dashboard</button>
+            </div>
+            <p id="clientIdStatus" class="settings-hint" role="status" aria-live="polite"></p>
+          </div>
+        </div>
+
+        <div class="settings-section">
           <div class="settings-label">Account Spotify</div>
           <div class="profile-well">
             <div class="profile-card">
@@ -242,7 +260,7 @@
               <button id="profileLogoutBtn" class="key key-wide">Disconnetti</button>
             </div>
             <p id="spotifyStatus" class="settings-hint" role="status" aria-live="polite"></p>
-            <p id="playerHint" class="settings-hint">Spotteck suona come dispositivo Spotify Connect: lo trovi anche nel menu Dispositivi dell’app Spotify sul telefono. Uscita: predefinita del sistema.</p>
+            <p id="playerHint" class="settings-hint">Spotteck comanda l’app Spotify ufficiale: su questo computer, sul telefono o su un altoparlante. Per i visualizzatori, ascolta con Spotify su questo computer.</p>
             <p id="audioAnalysisStatus" class="settings-hint" role="status">Visualizzatori: in attesa dell’audio reale.</p>
           </div>
         </div>

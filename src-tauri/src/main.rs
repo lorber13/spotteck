@@ -3,33 +3,20 @@
 
 mod commands;
 mod credentials;
-mod now_playing;
 
 use commands::App;
+use spotteck_capture::{AudioTap, Status};
 use spotteck_core::pinned::PinnedStore;
 use spotteck_core::readiness::Readiness;
+use spotteck_core::settings::SettingsStore;
 use spotteck_core::state::Payload;
-use spotteck_spotify::{AudioTap, Engine, EngineConfig};
-use std::path::Path;
+use spotteck_spotify::{Engine, EngineConfig};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, RunEvent};
 
-/// A random ID kept per installation, so Spotify Connect lists one stable "Spotteck".
-fn device_id(dir: &Path) -> String {
-    let path = dir.join("device-id");
-    if let Ok(id) = std::fs::read_to_string(&path) {
-        let id = id.trim();
-        if !id.is_empty() {
-            return id.to_owned();
-        }
-    }
-    let id = uuid::Uuid::new_v4().to_string();
-    let _ = std::fs::create_dir_all(dir).and_then(|_| std::fs::write(&path, &id));
-    id
-}
-
-/// The name the user gave this computer (System Settings → General → About on macOS).
+/// The name the user gave this computer (System Settings → General → About on macOS). Spotify
+/// on this computer usually appears under this name in the Connect device list.
 #[cfg(target_os = "macos")]
 fn computer_name() -> Option<String> {
     let output = std::process::Command::new("scutil").args(["--get", "ComputerName"]).output().ok()?;
@@ -46,19 +33,14 @@ fn computer_name() -> Option<String> {
     std::fs::read_to_string("/proc/sys/kernel/hostname").or_else(|_| std::fs::read_to_string("/etc/hostname")).ok()
 }
 
-fn device_name() -> String {
-    computer_name()
-        .map(|n| n.trim().to_owned())
-        .filter(|n| !n.is_empty())
-        .map(|n| format!("Spotteck · {n}"))
-        .unwrap_or_else(|| "Spotteck".into())
+fn this_computer() -> String {
+    computer_name().map(|n| n.trim().to_owned()).unwrap_or_default()
 }
 
 fn on_state(app: AppHandle) -> impl Fn(Payload) + Send + Sync {
     let last_readiness = Mutex::new(Readiness::SignedOut);
     move |payload: Payload| {
         let _ = app.emit("spotify:state", &payload);
-        now_playing::update(&app, &payload);
         let mut last = last_readiness.lock().unwrap();
         if *last != payload.readiness {
             // Signing in or out changes which playlists the grid shows.
@@ -70,7 +52,12 @@ fn on_state(app: AppHandle) -> impl Fn(Payload) + Send + Sync {
     }
 }
 
-fn start_analyzer(app: AppHandle, tap: Arc<AudioTap>) {
+/// The visualizers listen to Spotify on this computer through the OS's per-process loopback.
+fn start_visualizer_audio(app: AppHandle, tap: Arc<AudioTap>) {
+    let status_app = app.clone();
+    spotteck_capture::start(tap.clone(), move |status: Status| {
+        let _ = status_app.emit("audio:status", status.message());
+    });
     let mut status_at: Option<Instant> = None;
     tap.spawn_analyzer(move |frame| {
         let _ = app.emit("audio:frame", &frame);
@@ -95,7 +82,6 @@ fn start_heartbeat(app: AppHandle, engine: Engine) {
             let payload = engine.payload();
             if payload.is_playing {
                 let _ = app.emit("spotify:state", &payload);
-                now_playing::update(&app, &payload);
             }
         }
     });
@@ -115,23 +101,21 @@ fn main() {
                 pinned.import_legacy(&support.join("Spotteck/user-data/playlists.json"));
             }
 
-            let tap = Arc::new(AudioTap::default());
+            let settings = Arc::new(SettingsStore::new(data_dir.join("settings.json")));
+            let client_id = settings.clone();
             let engine = Engine::new(EngineConfig {
-                device_name: device_name(),
-                device_id: device_id(&data_dir),
-                tmp_dir: app.path().temp_dir()?,
+                computer_name: this_computer(),
+                client_id: Box::new(move || client_id.client_id()),
                 credentials: Arc::new(credentials::Keychain),
                 on_state: Box::new(on_state(handle.clone())),
-                tap: tap.clone(),
             });
 
-            now_playing::install(app, engine.clone());
-            start_analyzer(handle.clone(), tap);
+            start_visualizer_audio(handle.clone(), Arc::new(AudioTap::default()));
             start_heartbeat(handle.clone(), engine.clone());
             let starting = engine.clone();
             tauri::async_runtime::spawn(async move { starting.start() });
 
-            app.manage(App { engine, pinned });
+            app.manage(App { engine, pinned, settings });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -147,6 +131,9 @@ fn main() {
             commands::get_profile,
             commands::login,
             commands::logout,
+            commands::get_client_id,
+            commands::set_client_id,
+            commands::open_developer_dashboard,
             commands::playlists_get,
             commands::playlists_tracks,
             commands::playlists_add_url,

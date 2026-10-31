@@ -1,6 +1,6 @@
 [package]
 name = "spotteck-core"
-description = "Spotteck logic that needs no audio or windowing system: readiness, player state, pinned playlists, spectrum analysis"
+description = "Spotteck logic that needs no audio or windowing system: readiness, player state, Web API responses, PKCE, pinned playlists, spectrum analysis"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,6 +12,9 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 rustfft = "6.4"
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.3"
 
 [dev-dependencies]
 tempfile = "3"

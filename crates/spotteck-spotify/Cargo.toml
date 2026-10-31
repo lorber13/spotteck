@@ -1,6 +1,6 @@
 [package]
 name = "spotteck-spotify"
-description = "Spotteck's connection to Spotify through librespot: login, Spotify Connect playback, library and the visualizer tap"
+description = "Spotteck's connection to Spotify through the official Web API: PKCE login with the user's Client ID, playback control of the user's Spotify apps, and the library"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,12 +12,6 @@ spotteck-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
-tokio.workspace = true
-futures-util = "0.3"
-protobuf = "3.7"
-librespot-core = "=0.8.0"
-librespot-connect = "=0.8.0"
-librespot-metadata = "=0.8.0"
-librespot-oauth = "=0.8.0"
-librespot-protocol = "=0.8.0"
-librespot-playback = { version = "=0.8.0", default-features = false, features = ["rodio-backend", "native-tls"] }
+tokio = { workspace = true, features = ["net", "io-util"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+open = "5"

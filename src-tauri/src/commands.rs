@@ -4,14 +4,20 @@
 use serde_json::{json, Value};
 use spotteck_core::library::{merge, PlaylistEntry};
 use spotteck_core::pinned::{PinnedPlaylist, PinnedStore};
+use spotteck_core::settings::SettingsStore;
 use spotteck_core::state::Payload;
 use spotteck_core::uri::playlist_id_of;
-use spotteck_spotify::Engine;
+use spotteck_spotify::{Engine, REDIRECT_URI};
+use std::sync::Arc;
 use tauri::State;
+
+/// Where each user creates their own Spotify app and copies its Client ID.
+const DEVELOPER_DASHBOARD: &str = "https://developer.spotify.com/dashboard";
 
 pub struct App {
     pub engine: Engine,
     pub pinned: PinnedStore,
+    pub settings: Arc<SettingsStore>,
 }
 
 fn reply(result: Result<(), String>) -> Value {
@@ -27,43 +33,43 @@ pub fn get_state(app: State<'_, App>) -> Payload {
 }
 
 #[tauri::command]
-pub fn play_pause(app: State<'_, App>) -> Value {
-    reply(app.engine.play_pause())
+pub async fn play_pause(app: State<'_, App>) -> Result<Value, ()> {
+    Ok(reply(app.engine.play_pause().await))
 }
 
 #[tauri::command]
-pub fn next(app: State<'_, App>) -> Value {
-    reply(app.engine.next())
+pub async fn next(app: State<'_, App>) -> Result<Value, ()> {
+    Ok(reply(app.engine.next().await))
 }
 
 #[tauri::command]
-pub fn prev(app: State<'_, App>) -> Value {
-    reply(app.engine.prev())
+pub async fn prev(app: State<'_, App>) -> Result<Value, ()> {
+    Ok(reply(app.engine.prev().await))
 }
 
 #[tauri::command]
-pub fn set_shuffle(app: State<'_, App>, value: bool) -> Value {
-    reply(app.engine.set_shuffle(value))
+pub async fn set_shuffle(app: State<'_, App>, value: bool) -> Result<Value, ()> {
+    Ok(reply(app.engine.set_shuffle(value).await))
 }
 
 #[tauri::command]
-pub fn seek(app: State<'_, App>, seconds: f64) -> Value {
-    reply(app.engine.seek(seconds))
+pub async fn seek(app: State<'_, App>, seconds: f64) -> Result<Value, ()> {
+    Ok(reply(app.engine.seek(seconds).await))
 }
 
 #[tauri::command]
-pub fn set_volume(app: State<'_, App>, volume: f64) -> Value {
-    reply(app.engine.set_volume(volume))
+pub async fn set_volume(app: State<'_, App>, volume: f64) -> Result<Value, ()> {
+    Ok(reply(app.engine.set_volume(volume).await))
 }
 
 #[tauri::command]
-pub fn play_uri(app: State<'_, App>, uri: String) -> Value {
-    reply(app.engine.play(&uri, None))
+pub async fn play_uri(app: State<'_, App>, uri: String) -> Result<Value, ()> {
+    Ok(reply(app.engine.play(&uri, None).await))
 }
 
 #[tauri::command]
-pub fn play_track_in_context(app: State<'_, App>, track: String, context: String) -> Value {
-    reply(app.engine.play(&context, Some(&track)))
+pub async fn play_track_in_context(app: State<'_, App>, track: String, context: String) -> Result<Value, ()> {
+    Ok(reply(app.engine.play(&context, Some(&track)).await))
 }
 
 #[tauri::command]
@@ -87,6 +93,31 @@ pub async fn login(app: State<'_, App>) -> Result<Value, ()> {
 pub fn logout(app: State<'_, App>) -> Value {
     app.engine.logout();
     json!({ "ok": true })
+}
+
+/// The Client ID of the user's Spotify app and the Redirect URI to register in it.
+#[tauri::command]
+pub fn get_client_id(app: State<'_, App>) -> Value {
+    json!({ "clientId": app.settings.client_id().unwrap_or_default(), "redirectUri": REDIRECT_URI })
+}
+
+/// Saves the Client ID. A different ID signs out: the login belongs to the previous app.
+#[tauri::command]
+pub fn set_client_id(app: State<'_, App>, client_id: String) -> Value {
+    match app.settings.set_client_id(&client_id) {
+        Ok(changed) => {
+            if changed {
+                app.engine.client_id_changed();
+            }
+            json!({ "ok": true, "clientId": app.settings.client_id().unwrap_or_default() })
+        }
+        Err(error) => json!({ "error": error }),
+    }
+}
+
+#[tauri::command]
+pub fn open_developer_dashboard() -> Value {
+    reply(open::that_detached(DEVELOPER_DASHBOARD).map_err(|_| "Impossibile aprire il browser.".to_owned()))
 }
 
 /// Library plus pinned playlists. Signed out or offline, only the pinned ones.

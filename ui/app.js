@@ -536,9 +536,11 @@
         profileLoginBtn.textContent = 'Cambia Account';
         profileLogoutBtn.style.display = '';
       } else {
-        const signedOut = !res || res.readiness === 'signed-out';
+        const needsClientId = res?.readiness === 'needs-client-id';
+        const signedOut = !res || needsClientId || res.readiness === 'signed-out';
         profileName.textContent = signedOut ? 'Non connesso' : 'Account Spotify';
-        profileSub.textContent = signedOut ? 'Accedi con Spotify Premium' : (res.message || 'Spotify');
+        profileSub.textContent = needsClientId ? 'Prima inserisci il Client ID' :
+          signedOut ? 'Accedi con Spotify Premium' : (res.message || 'Spotify');
         profileLed.classList.remove('on');
         profileAvatar.textContent = '–';
         profileLoginBtn.textContent = signedOut ? 'Accedi' : 'Cambia Account';
@@ -547,9 +549,56 @@
     } catch (_e) {}
   }
 
+  // The Client ID of the user's own Spotify developer app (official Web API, PKCE login).
+  const clientIdInput = document.getElementById('clientIdInput');
+  const clientIdStatus = document.getElementById('clientIdStatus');
+  const redirectUri = document.getElementById('redirectUri');
+  async function refreshClientIdUI() {
+    if (!bridge?.getClientId || !clientIdInput) return;
+    try {
+      const res = await bridge.getClientId();
+      if (document.activeElement !== clientIdInput) clientIdInput.value = res?.clientId || '';
+      if (res?.redirectUri && redirectUri) redirectUri.textContent = res.redirectUri;
+      if (!res?.clientId) clientIdStatus.textContent = 'Nessun Client ID: Spotteck non può accedere a Spotify.';
+      else if (!clientIdStatus.textContent.startsWith('Salvato')) clientIdStatus.textContent = '';
+    } catch (_e) {}
+  }
+  document.getElementById('saveClientIdBtn')?.addEventListener('click', async () => {
+    if (!bridge?.setClientId) return;
+    try {
+      const res = await bridge.setClientId(clientIdInput.value);
+      if (res?.error) {
+        clientIdStatus.textContent = res.error;
+        return;
+      }
+      clientIdInput.value = res?.clientId || '';
+      clientIdStatus.textContent = res?.clientId ? 'Salvato. Ora premi Accedi.' : 'Client ID rimosso.';
+      await refreshProfileUI();
+    } catch (_e) {
+      clientIdStatus.textContent = 'Impossibile salvare il Client ID.';
+    }
+  });
+  document.getElementById('openDashboardBtn')?.addEventListener('click', () => {
+    bridge?.openDeveloperDashboard?.();
+  });
+  document.getElementById('copyRedirectBtn')?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(redirectUri.textContent.trim());
+      clientIdStatus.textContent = 'Redirect URI copiato.';
+    } catch (_e) {
+      const range = document.createRange();
+      range.selectNodeContents(redirectUri);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      clientIdStatus.textContent = 'Seleziona e copia il Redirect URI.';
+    }
+  });
+
   if (settingsBtn && settingsModal) {
     settingsBtn.addEventListener('click', () => {
       renderVisChecklist();
+      refreshClientIdUI();
       refreshProfileUI();
       settingsModal.classList.add('open');
     });

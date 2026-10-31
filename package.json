@@ -1,9 +1,9 @@
 {
   "name": "spotteck",
   "productName": "Spotteck",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "Minimalist Braun-inspired Spotify Premium player & analog visualizer",
+  "description": "Minimalist Braun-inspired Spotify Premium remote & analog visualizer, on the official Web API",
   "scripts": {
     "test": "cargo test --workspace && node --test tests/*.test.js",
     "start": "tauri dev",

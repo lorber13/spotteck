@@ -7,6 +7,7 @@ use std::time::Duration;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Readiness {
+    NeedsClientId,
     SignedOut,
     Connecting,
     PlanUnsupported,
@@ -18,18 +19,20 @@ impl Readiness {
     /// Italian text for the account panel and for refused commands.
     pub fn message(&self) -> &'static str {
         match self {
+            Readiness::NeedsClientId => "Inserisci il Client ID della tua app Spotify nelle Impostazioni.",
             Readiness::SignedOut => "Accedi con il tuo account Spotify Premium.",
             Readiness::Connecting => "Connessione a Spotify in corso…",
             Readiness::PlanUnsupported => "Spotteck richiede Spotify Premium.",
-            Readiness::Ready => "Lettore Spotteck pronto.",
-            Readiness::EngineError => "Il lettore Spotify non risponde. Riprova tra poco.",
+            Readiness::Ready => "Collegato a Spotify.",
+            Readiness::EngineError => "Spotify non risponde. Riprova tra poco.",
         }
     }
 
-    /// The state for a plan reported by Spotify's `type` user attribute. Family, Duo and
-    /// Student plans report `premium`; Free accounts report `free` or `open`.
-    pub fn from_plan(plan: Option<&str>) -> Readiness {
-        match plan.map(str::to_ascii_lowercase).as_deref() {
+    /// The state for the `product` field of the Web API's `GET /me`. Family, Duo and
+    /// Student plans report `premium`; Free accounts report `free` or `open`. When the field
+    /// is missing, the player endpoints answer `PREMIUM_REQUIRED` for Free accounts instead.
+    pub fn from_product(product: Option<&str>) -> Readiness {
+        match product.map(str::to_ascii_lowercase).as_deref() {
             Some("free") | Some("open") => Readiness::PlanUnsupported,
             _ => Readiness::Ready,
         }
@@ -87,17 +90,23 @@ mod tests {
 
     #[test]
     fn plans() {
-        assert_eq!(Readiness::from_plan(Some("premium")), Readiness::Ready);
-        assert_eq!(Readiness::from_plan(Some("Free")), Readiness::PlanUnsupported);
-        assert_eq!(Readiness::from_plan(Some("open")), Readiness::PlanUnsupported);
-        // Missing attribute: the login itself already enforces Premium.
-        assert_eq!(Readiness::from_plan(None), Readiness::Ready);
+        assert_eq!(Readiness::from_product(Some("premium")), Readiness::Ready);
+        assert_eq!(Readiness::from_product(Some("Free")), Readiness::PlanUnsupported);
+        assert_eq!(Readiness::from_product(Some("open")), Readiness::PlanUnsupported);
+        // Missing field: the player endpoints still refuse Free accounts.
+        assert_eq!(Readiness::from_product(None), Readiness::Ready);
     }
 
     #[test]
     fn gate_refuses_every_state_but_ready() {
         assert!(Readiness::Ready.gate().is_ok());
-        for state in [Readiness::SignedOut, Readiness::Connecting, Readiness::PlanUnsupported, Readiness::EngineError] {
+        for state in [
+            Readiness::NeedsClientId,
+            Readiness::SignedOut,
+            Readiness::Connecting,
+            Readiness::PlanUnsupported,
+            Readiness::EngineError,
+        ] {
             assert_eq!(state.gate().unwrap_err(), state.message());
         }
         assert_eq!(Readiness::PlanUnsupported.gate().unwrap_err(), "Spotteck richiede Spotify Premium.");
@@ -106,6 +115,7 @@ mod tests {
     #[test]
     fn serializes_kebab_case() {
         assert_eq!(serde_json::to_string(&Readiness::PlanUnsupported).unwrap(), "\"plan-unsupported\"");
+        assert_eq!(serde_json::to_string(&Readiness::NeedsClientId).unwrap(), "\"needs-client-id\"");
     }
 
     #[test]
