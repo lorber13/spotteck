@@ -19,8 +19,9 @@ const fixtures = {
     { id: 'spotify:playlist:4uLU6hMCjMI75M1A2tKUQC', name: 'Pinned', image: '', pinned: true }
   ],
   tracks: [{ uri: 'spotify:track:mock1', title: 'Weniger, aber besser', artist: 'Dieter Rams', duration: 214, playable: true }],
-  profile: { authenticated: true, readiness: 'ready', message: 'Lettore Spotteck pronto.', profile: { name: 'Dieter Rams', product: 'Premium', avatar: '' } },
-  controlError: 'Spotteck richiede Spotify Premium.'
+  profile: { authenticated: true, readiness: 'ready', message: 'Collegato a Spotify.', profile: { name: 'Dieter Rams', product: 'Premium', avatar: '' } },
+  controlError: 'Spotteck richiede Spotify Premium.',
+  clientId: '0123456789abcdef0123456789abcdef'
 };
 
 (async () => {
@@ -56,19 +57,32 @@ const fixtures = {
   await page.waitForTimeout(150);
   assert.equal(await page.locator('#presetToast').textContent(), fixtures.controlError);
 
-  // Settings reflect the profile; no Soloist or Client ID fields remain.
+  // Settings reflect the profile and the user's own Client ID; no Soloist setup remains.
   await page.locator('#settingsBtn').click();
   await page.waitForTimeout(200);
   assert.equal(await page.locator('#profileName').textContent(), 'Dieter Rams');
   assert.equal(await page.locator('#profileSub').textContent(), 'Premium · Spotteck');
-  assert.equal(await page.locator('#soloistSetup, #spotifyClientId').count(), 0);
+  assert.equal(await page.locator('#soloistSetup').count(), 0);
+  assert.equal(await page.locator('#clientIdInput').inputValue(), fixtures.clientId);
+  assert.equal(await page.locator('#redirectUri').textContent(), 'http://127.0.0.1:43821/callback');
+  await page.locator('#clientIdInput').fill('not-a-client-id');
+  await page.locator('#saveClientIdBtn').click();
+  await page.waitForTimeout(150);
+  assert.match(await page.locator('#clientIdStatus').textContent(), /Client ID non valido/);
+  await page.locator('#clientIdInput').fill('ABCDEF0123456789ABCDEF0123456789');
+  await page.locator('#saveClientIdBtn').click();
+  await page.waitForTimeout(150);
+  assert.equal(await page.locator('#clientIdInput').inputValue(), 'abcdef0123456789abcdef0123456789');
+  assert.match(await page.locator('#clientIdStatus').textContent(), /^Salvato/);
 
   // Native audio frames reach the visualizers' status line.
   await page.evaluate(() => window.__mockEmit('audio:status', 'Visualizzatori: audio reale collegato.'));
   assert.equal(await page.locator('#audioAnalysisStatus').textContent(), 'Visualizzatori: audio reale collegato.');
 
   const calls = await page.evaluate(() => window.__mockCalls.map((c) => c.command));
-  for (const command of ['playlists_get', 'get_state', 'next', 'get_profile']) assert.ok(calls.includes(command), command);
+  for (const command of ['playlists_get', 'get_state', 'next', 'get_profile', 'get_client_id', 'set_client_id']) {
+    assert.ok(calls.includes(command), command);
+  }
   assert.equal(await page.evaluate(() => window.__micRequests), 0, 'microphone must never be requested');
   assert.deepEqual(errors, []);
 

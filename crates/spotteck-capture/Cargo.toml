@@ -1,0 +1,26 @@
+[package]
+name = "spotteck-capture"
+description = "The visualizer audio: a per-process loopback of Spotify on this computer (Core Audio process tap, WASAPI process loopback, PipeWire), analyzed into frames"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+spotteck-core.workspace = true
+log.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSValue", "NSString", "NSUUID", "NSDictionary", "NSObject"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFString", "CFDictionary"] }
+objc2-core-audio = "0.3"
+objc2-core-audio-types = "0.3"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+wasapi = "0.19"
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+pipewire = "0.8"

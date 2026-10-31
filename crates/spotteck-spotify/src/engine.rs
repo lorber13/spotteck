@@ -1,46 +1,32 @@
-//! One librespot session that logs in, plays as the "Spotteck" Spotify Connect device and
-//! reports player state. Every async path captures the account generation and drops its
-//! result if the user logged out or switched account meanwhile.
+//! Spotteck as a remote control for the user's own Spotify apps, through the official Web
+//! API. It polls the playback state, sends commands to the active Spotify Connect device
+//! and keeps the account readiness. Every async path captures the account generation and
+//! drops its result if the user logged out or switched account meanwhile.
 
-use crate::library::{pick_cover, Library};
-use crate::tap::{AudioTap, TeeSink};
-use librespot_connect::{
-    ConnectConfig, LoadContextOptions, LoadRequest, LoadRequestOptions, Options, PlayingTrack, Spirc,
-};
-use librespot_core::authentication::Credentials;
-use librespot_core::config::DeviceType;
-use librespot_core::{Error, Session, SessionConfig};
-use librespot_metadata::audio::{AudioItem, UniqueFields};
-use librespot_oauth::OAuthClientBuilder;
-use librespot_playback::audio_backend;
-use librespot_playback::config::{AudioFormat, Bitrate, PlayerConfig};
-use librespot_playback::mixer::softmixer::SoftMixer;
-use librespot_playback::mixer::{Mixer, MixerConfig};
-use librespot_playback::player::{Player, PlayerEvent, PlayerEventChannel};
-use librespot_protocol::authentication::AuthenticationType;
+use crate::api::Api;
+use crate::auth;
+use crate::library::Library;
+use reqwest::Method;
 use serde::Serialize;
+use serde_json::{json, Value};
 use spotteck_core::library::{PlaylistEntry, TrackEntry};
 use spotteck_core::readiness::{Backoff, Generation, Readiness};
-use spotteck_core::state::{percent_to_volume, Payload, PlayerState, Update};
+use spotteck_core::state::{clamp_percent, Payload, PlayerState, Update};
 use spotteck_core::uri::{playlist_id_of, playlist_uri, track_id_of, track_uri};
-use std::future::Future;
-use std::path::PathBuf;
-use std::pin::Pin;
+use spotteck_core::webapi::{pick_cover, pick_device, Devices, Failure, Me, Playback};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tokio::sync::{oneshot, Notify};
 
-/// librespot's own client ID; its redirect URI is the only one registered for it.
-const CLIENT_ID: &str = "65b708073fc0480ea92a077233ca87bd";
-const REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
-const LOGIN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
-const LOGIN_PAGE: &str = r#"<!doctype html><html lang="it"><meta charset="utf-8"><title>Spotteck</title>
-<body style="font:15px -apple-system,sans-serif;background:#141413;color:#eee;display:grid;place-items:center;height:90vh">
-<p>Accesso completato. Puoi chiudere questa scheda e tornare a Spotteck.</p></body></html>"#;
+const NOTHING_PLAYING: &str = "Nessuna riproduzione attiva su Spotify: avvia una playlist.";
+/// Polling while something plays; the UI interpolates the position in between.
+const PLAYING_POLL: Duration = Duration::from_secs(1);
+const IDLE_POLL: Duration = Duration::from_secs(4);
+/// Spotify needs a moment before `GET /me/player` reflects a command.
+const SETTLE: Duration = Duration::from_millis(700);
 
-const NOT_RESPONDING: &str = "Il lettore Spotify non risponde. Riprova tra poco.";
-const NOTHING_PLAYING: &str = "Avvia una playlist su Spotteck.";
-
-/// Where the reusable login is kept (the macOS Keychain in the app).
+/// Where the saved login is kept (the system keychain in the app).
 pub trait CredentialStore: Send + Sync {
     fn load(&self) -> Option<String>;
     fn save(&self, secret: &str) -> Result<(), String>;
@@ -48,13 +34,13 @@ pub trait CredentialStore: Send + Sync {
 }
 
 pub struct EngineConfig {
-    pub device_name: String,
-    /// Stable per installation, so other Spotify apps keep seeing the same device.
-    pub device_id: String,
-    pub tmp_dir: PathBuf,
+    /// The name of this computer, used to prefer Spotify on this computer when no device
+    /// is active.
+    pub computer_name: String,
+    /// The Client ID of the user's own Spotify developer app, if configured.
+    pub client_id: Box<dyn Fn() -> Option<String> + Send + Sync>,
     pub credentials: Arc<dyn CredentialStore>,
     pub on_state: Box<dyn Fn(Payload) + Send + Sync>,
-    pub tap: Arc<AudioTap>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -65,49 +51,49 @@ pub struct Profile {
 }
 
 #[derive(Clone)]
-struct Link {
-    epoch: u64,
-    session: Session,
-    spirc: Arc<Spirc>,
-    mixer: Arc<dyn Mixer>,
-}
-
-enum ConnectError {
-    PlanUnsupported,
-    BadCredentials,
-    Transient(String),
-}
-
-fn classify(error: &Error) -> ConnectError {
-    let text = error.to_string();
-    if text.contains("Premium account required") {
-        ConnectError::PlanUnsupported
-    } else if text.contains("Bad credentials") {
-        ConnectError::BadCredentials
-    } else {
-        ConnectError::Transient(text)
-    }
-}
-
-#[derive(Clone)]
 pub struct Engine(Arc<Inner>);
 
 struct Inner {
     config: EngineConfig,
     state: Mutex<PlayerState>,
     generation: Generation,
-    link: Mutex<Option<Link>>,
+    api: Api,
     library: Library,
+    wake: Notify,
+    profile: Mutex<Option<Profile>>,
+    logging_in: AtomicBool,
+    cancel_login: Mutex<Option<oneshot::Sender<()>>>,
+}
+
+fn capitalize(product: &str) -> String {
+    let mut chars = product.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+}
+
+fn profile_of(me: &Me) -> Profile {
+    Profile {
+        name: me.display_name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| me.id.clone()),
+        product: match me.product.as_deref() {
+            None | Some("premium") => "Premium".into(),
+            Some(other) => capitalize(other),
+        },
+        avatar: pick_cover(&me.images),
+    }
 }
 
 impl Engine {
     pub fn new(config: EngineConfig) -> Engine {
+        let api = Api::new(config.credentials.clone());
         Engine(Arc::new(Inner {
             config,
             state: Mutex::new(PlayerState::default()),
             generation: Generation::default(),
-            link: Mutex::new(None),
+            api,
             library: Library::default(),
+            wake: Notify::new(),
+            profile: Mutex::new(None),
+            logging_in: AtomicBool::new(false),
+            cancel_login: Mutex::new(None),
         }))
     }
 
@@ -124,419 +110,424 @@ impl Engine {
         (self.0.config.on_state)(payload);
     }
 
+    /// Applies `f` if `epoch` is still current, and tells the UI when anything changed.
     fn update(&self, epoch: u64, f: impl FnOnce(&mut PlayerState)) {
         if !self.0.generation.is_current(epoch) {
             return;
         }
-        f(&mut self.0.state.lock().unwrap());
-        self.notify();
+        let changed = {
+            let mut state = self.0.state.lock().unwrap();
+            let now = Instant::now();
+            let before = state.payload(now);
+            f(&mut state);
+            state.payload(now) != before
+        };
+        if changed {
+            self.notify();
+        }
     }
 
     fn set_readiness(&self, epoch: u64, readiness: Readiness) {
         self.update(epoch, |s| s.readiness = readiness);
     }
 
-    /// Reconnects with the saved login, if any. Called once at startup.
-    pub fn start(&self) {
-        let epoch = self.0.generation.current();
-        if self.0.config.credentials.load().is_none() {
-            self.set_readiness(epoch, Readiness::SignedOut);
-            return;
+    /// The readiness before any request: no Client ID, no saved login, or a login made with
+    /// another Client ID.
+    fn offline_readiness(&self) -> Readiness {
+        let Some(client_id) = (self.0.config.client_id)() else {
+            return Readiness::NeedsClientId;
+        };
+        match self.0.api.tokens() {
+            Some(tokens) if tokens.client_id.eq_ignore_ascii_case(&client_id) => Readiness::Connecting,
+            Some(_) => {
+                self.0.api.clear();
+                Readiness::SignedOut
+            }
+            None => Readiness::SignedOut,
         }
-        self.set_readiness(epoch, Readiness::Connecting);
-        let engine = self.clone();
-        tokio::spawn(async move { engine.reconnect(epoch).await });
     }
 
-    /// Browser login. Returns once Spotteck is connected, or with an Italian error.
-    pub async fn login(&self) -> Result<(), String> {
-        let epoch = self.0.generation.bump();
-        self.disconnect();
+    /// Restores the saved login and starts following playback. Called once at startup.
+    pub fn start(&self) {
+        let epoch = self.0.generation.current();
+        let readiness = self.offline_readiness();
+        self.set_readiness(epoch, readiness);
+        let engine = self.clone();
+        tokio::spawn(async move { engine.run().await });
+    }
+
+    /// The user saved another Client ID: the old login belongs to the old app.
+    pub fn client_id_changed(&self) {
+        self.logout();
+    }
+
+    fn cancel_login(&self) {
+        if let Some(cancel) = self.0.cancel_login.lock().unwrap().take() {
+            let _ = cancel.send(());
+        }
+    }
+
+    fn forget_account(&self) {
         self.0.library.clear();
+        *self.0.profile.lock().unwrap() = None;
+    }
+
+    /// Browser login. Returns once the account is checked, or with an Italian error.
+    pub async fn login(&self) -> Result<(), String> {
+        let Some(client_id) = (self.0.config.client_id)() else {
+            return Err(Readiness::NeedsClientId.message().into());
+        };
+        let epoch = self.0.generation.bump();
+        self.cancel_login();
+        let (cancel, cancelled) = oneshot::channel();
+        *self.0.cancel_login.lock().unwrap() = Some(cancel);
+        self.0.logging_in.store(true, Ordering::Release);
+        self.forget_account();
         self.0.state.lock().unwrap().reset(Readiness::Connecting);
         self.notify();
 
-        let client = OAuthClientBuilder::new(CLIENT_ID, REDIRECT_URI, vec!["streaming"])
-            .open_in_browser()
-            .with_custom_message(LOGIN_PAGE)
-            .build()
-            .map_err(|_| "Impossibile avviare l’accesso a Spotify.".to_owned());
-        let token = match client {
-            Ok(client) => match tokio::time::timeout(LOGIN_TIMEOUT, client.get_access_token_async()).await {
-                Ok(Ok(token)) => Ok(token),
-                Ok(Err(_)) => Err("Accesso non riuscito. Riprova.".to_owned()),
-                Err(_) => Err("Accesso scaduto: completa il login nel browser entro cinque minuti.".to_owned()),
-            },
-            Err(e) => Err(e),
-        };
-        let token = match token {
-            Ok(token) => token,
-            Err(e) => {
-                let fallback = if self.0.config.credentials.load().is_some() {
-                    Readiness::EngineError
-                } else {
-                    Readiness::SignedOut
-                };
-                self.set_readiness(epoch, fallback);
-                return Err(e);
-            }
+        let result = tokio::select! {
+            result = auth::authorize(self.0.api.http(), &client_id) => result,
+            _ = cancelled => Err("Accesso annullato.".to_owned()),
         };
         if !self.0.generation.is_current(epoch) {
             return Err("Accesso annullato.".into());
         }
-        match self.connect(Credentials::with_access_token(token.access_token), epoch).await {
-            Ok(()) => Ok(()),
-            Err(ConnectError::PlanUnsupported) => {
-                self.set_readiness(epoch, Readiness::PlanUnsupported);
-                Err(Readiness::PlanUnsupported.message().into())
+        self.0.logging_in.store(false, Ordering::Release);
+        *self.0.cancel_login.lock().unwrap() = None;
+        match result {
+            Ok(tokens) => {
+                self.0.api.set_tokens(tokens);
+                // Connected, or a definite answer (e.g. Free plan): either way the loop takes over.
+                let connected = self.connect(epoch).await;
+                self.0.wake.notify_one();
+                match self.readiness() {
+                    Readiness::Ready => Ok(()),
+                    _ if connected.is_err() => Err(Failure::Transient.message()),
+                    other => Err(other.message().into()),
+                }
             }
-            Err(ConnectError::BadCredentials) => {
-                self.set_readiness(epoch, Readiness::SignedOut);
-                Err("Spotify ha rifiutato l’accesso. Riprova.".into())
-            }
-            Err(ConnectError::Transient(_)) => {
-                self.set_readiness(epoch, Readiness::EngineError);
-                Err("Spotify non è raggiungibile. Controlla la connessione e riprova.".into())
+            Err(error) => {
+                // The previous login, if any, stays valid and reconnects.
+                let readiness = self.offline_readiness();
+                self.set_readiness(epoch, readiness);
+                self.0.wake.notify_one();
+                Err(error)
             }
         }
     }
 
-    /// Stops playback, forgets the saved login and clears the library cache.
+    /// Forgets the saved login and the library cache. Playback on the user's devices goes on.
     pub fn logout(&self) {
         self.0.generation.bump();
-        self.disconnect();
-        self.0.config.credentials.delete();
-        self.0.library.clear();
-        self.0.state.lock().unwrap().reset(Readiness::SignedOut);
+        self.cancel_login();
+        self.0.logging_in.store(false, Ordering::Release);
+        self.0.api.clear();
+        self.forget_account();
+        let readiness = self.offline_readiness();
+        self.0.state.lock().unwrap().reset(readiness);
         self.notify();
+        self.0.wake.notify_one();
     }
 
-    /// Shuts the current session down, e.g. when the app quits.
+    /// Called when the app quits: abandons a login waiting in the browser.
     pub fn disconnect(&self) {
-        if let Some(link) = self.0.link.lock().unwrap().take() {
-            let _ = link.spirc.shutdown();
-            link.session.shutdown();
-        }
+        self.cancel_login();
     }
 
-    async fn reconnect(&self, epoch: u64) {
+    async fn run(self) {
         let mut backoff = Backoff::default();
-        while self.0.generation.is_current(epoch) {
-            let Some(saved) = self.0.config.credentials.load() else {
-                self.set_readiness(epoch, Readiness::SignedOut);
-                return;
-            };
-            let Ok(credentials) = serde_json::from_str::<Credentials>(&saved) else {
-                self.0.config.credentials.delete();
-                self.set_readiness(epoch, Readiness::SignedOut);
-                return;
-            };
-            match self.connect(credentials, epoch).await {
-                Ok(()) => return,
-                Err(ConnectError::PlanUnsupported) => return self.set_readiness(epoch, Readiness::PlanUnsupported),
-                Err(ConnectError::BadCredentials) => {
-                    self.0.config.credentials.delete();
-                    return self.set_readiness(epoch, Readiness::SignedOut);
+        loop {
+            let epoch = self.0.generation.current();
+            let delay = match self.readiness() {
+                Readiness::Connecting if !self.0.logging_in.load(Ordering::Acquire) => {
+                    match self.connect(epoch).await {
+                        Ok(()) => {
+                            backoff.reset();
+                            Duration::ZERO
+                        }
+                        Err(()) => backoff.next_delay(),
+                    }
                 }
-                Err(ConnectError::Transient(e)) => {
-                    log::warn!("Spotify connection failed: {e}");
-                    // Keep showing what we had; the next attempt follows the backoff.
-                    self.set_readiness(epoch, Readiness::Connecting);
-                    tokio::time::sleep(backoff.next_delay()).await;
+                Readiness::Ready => self.poll(epoch).await,
+                _ => IDLE_POLL,
+            };
+            if delay > Duration::ZERO {
+                tokio::select! {
+                    _ = tokio::time::sleep(delay) => {}
+                    _ = self.0.wake.notified() => {}
                 }
             }
         }
     }
 
-    async fn connect(&self, credentials: Credentials, epoch: u64) -> Result<(), ConnectError> {
-        let config = &self.0.config;
-        let session = Session::new(
-            SessionConfig {
-                device_id: config.device_id.clone(),
-                tmp_dir: config.tmp_dir.clone(),
-                ..SessionConfig::default()
-            },
-            None,
-        );
-        let mixer: Arc<dyn Mixer> =
-            Arc::new(SoftMixer::open(MixerConfig::default()).map_err(|e| ConnectError::Transient(e.to_string()))?);
-        let backend = audio_backend::find(None).ok_or_else(|| ConnectError::Transient("no audio backend".into()))?;
-        let tap = config.tap.clone();
-        let sink_volume = mixer.get_soft_volume();
-        let player = Player::new(
-            PlayerConfig {
-                bitrate: Bitrate::Bitrate320,
-                position_update_interval: Some(Duration::from_secs(1)),
-                ..PlayerConfig::default()
-            },
-            session.clone(),
-            mixer.get_soft_volume(),
-            move || Box::new(TeeSink::new(backend(None, AudioFormat::default()), tap, sink_volume)),
-        );
-        let events = player.get_player_event_channel();
-        let volume = self.0.state.lock().unwrap().volume;
-        let connect = ConnectConfig {
-            name: config.device_name.clone(),
-            device_type: DeviceType::Computer,
-            initial_volume: volume,
-            ..ConnectConfig::default()
-        };
-        let (spirc, task) =
-            Spirc::new(connect, session.clone(), credentials, player, mixer.clone()).await.map_err(|e| classify(&e))?;
-
-        if !self.0.generation.is_current(epoch) {
-            let _ = spirc.shutdown();
-            session.shutdown();
-            return Ok(());
-        }
-
-        let reusable = Credentials {
-            username: Some(session.username()),
-            auth_type: AuthenticationType::AUTHENTICATION_STORED_SPOTIFY_CREDENTIALS,
-            auth_data: session.auth_data(),
-        };
-        if let Ok(secret) = serde_json::to_string(&reusable) {
-            if let Err(e) = config.credentials.save(&secret) {
-                log::warn!("Could not save the Spotify login: {e}");
+    /// Checks the account with `GET /me`. `Err` means "try again later".
+    async fn connect(&self, epoch: u64) -> Result<(), ()> {
+        match self.0.api.get::<Me>("/me", &[]).await {
+            Ok(Some(me)) => {
+                if self.0.generation.is_current(epoch) {
+                    *self.0.profile.lock().unwrap() = Some(profile_of(&me));
+                }
+                self.set_readiness(epoch, Readiness::from_product(me.product.as_deref()));
+                Ok(())
             }
+            Err(Failure::SignedOut) => {
+                self.set_readiness(epoch, Readiness::SignedOut);
+                Ok(())
+            }
+            Err(Failure::PremiumRequired) => {
+                self.set_readiness(epoch, Readiness::PlanUnsupported);
+                Ok(())
+            }
+            Ok(None) | Err(_) => Err(()),
         }
+    }
 
-        let plan = session.get_user_attribute("type");
-        *self.0.link.lock().unwrap() = Some(Link { epoch, session: session.clone(), spirc: Arc::new(spirc), mixer });
-        self.set_readiness(epoch, Readiness::from_plan(plan.as_deref()));
+    /// One `GET /me/player`. Returns how long to wait before the next one.
+    async fn poll(&self, epoch: u64) -> Duration {
+        let query = [("additional_types", "episode".to_owned())];
+        let updates = match self.0.api.get::<Playback>("/me/player", &query).await {
+            Ok(Some(playback)) => playback.updates(),
+            Ok(None) => vec![Update::Stopped],
+            Err(Failure::RateLimited(wait)) => return wait,
+            Err(failure) => {
+                self.on_failure(epoch, &failure);
+                return IDLE_POLL;
+            }
+        };
+        let now = Instant::now();
+        self.update(epoch, |s| {
+            for update in updates {
+                s.apply(update, now);
+            }
+        });
+        if self.0.state.lock().unwrap().playing {
+            PLAYING_POLL
+        } else {
+            IDLE_POLL
+        }
+    }
 
-        let engine = self.clone();
-        tokio::spawn(async move { engine.forward_events(events, epoch).await });
+    /// Account-level consequences of a failed request; returns the text for the UI.
+    fn on_failure(&self, epoch: u64, failure: &Failure) -> String {
+        match failure {
+            Failure::SignedOut => {
+                self.0.api.clear();
+                self.set_readiness(epoch, Readiness::SignedOut);
+            }
+            Failure::PremiumRequired => self.set_readiness(epoch, Readiness::PlanUnsupported),
+            _ => {}
+        }
+        failure.message()
+    }
+
+    /// Polls again shortly, once Spotify has applied the command.
+    fn settle(&self) {
         let engine = self.clone();
         tokio::spawn(async move {
-            task.await;
-            engine.on_session_closed(epoch, &session).await;
+            tokio::time::sleep(SETTLE).await;
+            engine.0.wake.notify_one();
         });
-        Ok(())
     }
 
-    async fn on_session_closed(&self, epoch: u64, session: &Session) {
-        {
-            let mut link = self.0.link.lock().unwrap();
-            match link.as_ref() {
-                Some(current) if current.epoch == epoch && current.session.session_id() == session.session_id() => {
-                    *link = None
-                }
-                _ => return,
-            }
-        }
-        if !self.0.generation.is_current(epoch) {
-            return;
-        }
-        log::warn!("Spotify session closed; reconnecting");
-        self.update(epoch, |s| {
-            s.apply(Update::Stopped, Instant::now());
-            s.readiness = Readiness::Connecting;
-        });
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        self.clone().reconnect_boxed(epoch).await;
-    }
-
-    /// `reconnect` → `connect` → `on_session_closed` → `reconnect` is a cycle; the box
-    /// gives it a nameable `Send` type.
-    fn reconnect_boxed(self, epoch: u64) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-        Box::pin(async move { self.reconnect(epoch).await })
-    }
-
-    async fn forward_events(&self, mut events: PlayerEventChannel, epoch: u64) {
-        while let Some(event) = events.recv().await {
-            if !self.0.generation.is_current(epoch) {
-                return;
-            }
-            let update = match event {
-                PlayerEvent::TrackChanged { audio_item } => track_update(&audio_item),
-                PlayerEvent::Playing { position_ms, .. } => Update::Playing { position_ms },
-                PlayerEvent::Paused { position_ms, .. } => Update::Paused { position_ms },
-                PlayerEvent::PositionChanged { position_ms, .. }
-                | PlayerEvent::PositionCorrection { position_ms, .. }
-                | PlayerEvent::Seeked { position_ms, .. } => Update::Position { position_ms },
-                PlayerEvent::Stopped { .. } => Update::Stopped,
-                PlayerEvent::ShuffleChanged { shuffle } => Update::Shuffle(shuffle),
-                PlayerEvent::VolumeChanged { volume } => Update::Volume(volume),
-                PlayerEvent::Unavailable { .. } => Update::Error("Brano non disponibile su Spotify.".into()),
-                _ => continue,
-            };
-            self.update(epoch, |s| s.apply(update, Instant::now()));
-        }
-    }
-
-    fn link(&self) -> Result<Link, String> {
+    fn gate(&self) -> Result<u64, String> {
         self.readiness().gate()?;
-        self.0.link.lock().unwrap().clone().ok_or_else(|| Readiness::Connecting.message().to_owned())
+        Ok(self.0.generation.current())
     }
 
-    fn active(&self) -> bool {
-        self.0.state.lock().unwrap().active
+    async fn send(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, String)],
+        body: Option<Value>,
+    ) -> Result<(), Failure> {
+        self.0.api.request(method, path, query, body.as_ref()).await.map(|_| ())
     }
 
-    fn send(result: Result<(), Error>) -> Result<(), String> {
-        result.map_err(|_| NOT_RESPONDING.to_owned())
+    /// The device to wake up when none is active (Spotify on this computer first).
+    async fn pick_device(&self, epoch: u64) -> Result<String, String> {
+        let devices = match self.0.api.get::<Devices>("/me/player/devices", &[]).await {
+            Ok(devices) => devices.unwrap_or_default(),
+            Err(failure) => return Err(self.on_failure(epoch, &failure)),
+        };
+        pick_device(&devices.devices, &self.0.config.computer_name)
+            .and_then(|d| d.id.clone())
+            .ok_or_else(|| Failure::NoActiveDevice.message())
     }
 
-    /// Plays or pauses here. When another device is playing, playback moves to Spotteck.
-    pub fn play_pause(&self) -> Result<(), String> {
-        let link = self.link()?;
-        Self::send(if self.active() { link.spirc.play_pause() } else { link.spirc.transfer(None) })
-    }
-
-    pub fn next(&self) -> Result<(), String> {
-        let link = self.link()?;
-        if !self.active() {
-            return Err(NOTHING_PLAYING.into());
+    /// Plays or pauses. With no active device, playback resumes on Spotify on this
+    /// computer (or the user's other Spotify app).
+    pub async fn play_pause(&self) -> Result<(), String> {
+        let epoch = self.gate()?;
+        let playing = self.0.state.lock().unwrap().playing;
+        let path = if playing { "/me/player/pause" } else { "/me/player/play" };
+        match self.send(Method::PUT, path, &[], None).await {
+            Ok(()) => {}
+            Err(Failure::NoActiveDevice) if !playing => {
+                let device = self.pick_device(epoch).await?;
+                let body = json!({ "device_ids": [device], "play": true });
+                self.send(Method::PUT, "/me/player", &[], Some(body)).await.map_err(|f| self.on_failure(epoch, &f))?;
+            }
+            Err(failure) => return Err(self.on_failure(epoch, &failure)),
         }
-        Self::send(link.spirc.next())
+        let now = Instant::now();
+        self.update(epoch, |s| {
+            if s.active {
+                let position_ms = s.position_ms(now);
+                s.apply(if playing { Update::Paused { position_ms } } else { Update::Playing { position_ms } }, now);
+            }
+        });
+        self.settle();
+        Ok(())
     }
 
-    pub fn prev(&self) -> Result<(), String> {
-        let link = self.link()?;
-        if !self.active() {
-            return Err(NOTHING_PLAYING.into());
+    async fn transport(&self, method: Method, path: &str, query: &[(&str, String)]) -> Result<u64, String> {
+        let epoch = self.gate()?;
+        match self.send(method, path, query, None).await {
+            Ok(()) => {
+                self.settle();
+                Ok(epoch)
+            }
+            Err(Failure::NoActiveDevice) => Err(NOTHING_PLAYING.into()),
+            Err(failure) => Err(self.on_failure(epoch, &failure)),
         }
-        Self::send(link.spirc.prev())
     }
 
-    pub fn seek(&self, seconds: f64) -> Result<(), String> {
-        let link = self.link()?;
-        if !self.active() {
-            return Err(NOTHING_PLAYING.into());
-        }
+    pub async fn next(&self) -> Result<(), String> {
+        self.transport(Method::POST, "/me/player/next", &[]).await.map(|_| ())
+    }
+
+    pub async fn prev(&self) -> Result<(), String> {
+        self.transport(Method::POST, "/me/player/previous", &[]).await.map(|_| ())
+    }
+
+    pub async fn seek(&self, seconds: f64) -> Result<(), String> {
         let ms = if seconds.is_finite() { (seconds.max(0.0) * 1000.0).min(f64::from(u32::MAX)) as u32 } else { 0 };
-        Self::send(link.spirc.set_position_ms(ms))?;
-        self.update(link.epoch, |s| s.apply(Update::Position { position_ms: ms }, Instant::now()));
+        let epoch = self.transport(Method::PUT, "/me/player/seek", &[("position_ms", ms.to_string())]).await?;
+        self.update(epoch, |s| s.apply(Update::Position { position_ms: ms }, Instant::now()));
         Ok(())
     }
 
-    /// 0–100. Works before anything plays, so playback starts at the chosen level.
-    pub fn set_volume(&self, percent: f64) -> Result<(), String> {
-        let link = self.link()?;
-        let volume = percent_to_volume(percent);
-        if self.active() {
-            Self::send(link.spirc.set_volume(volume))?;
-        } else {
-            link.mixer.set_volume(volume);
+    /// 0–100, on the device that is playing.
+    pub async fn set_volume(&self, percent: f64) -> Result<(), String> {
+        let epoch = self.gate()?;
+        let volume = clamp_percent(percent);
+        if self.0.state.lock().unwrap().active {
+            match self.send(Method::PUT, "/me/player/volume", &[("volume_percent", volume.to_string())], None).await {
+                Ok(()) | Err(Failure::NoActiveDevice) => {}
+                Err(failure) => return Err(self.on_failure(epoch, &failure)),
+            }
         }
-        self.update(link.epoch, |s| s.apply(Update::Volume(volume), Instant::now()));
+        self.update(epoch, |s| s.apply(Update::Volume(volume), Instant::now()));
+        self.settle();
         Ok(())
     }
 
-    pub fn set_shuffle(&self, shuffle: bool) -> Result<(), String> {
-        let link = self.link()?;
-        if self.active() {
-            Self::send(link.spirc.shuffle(shuffle))?;
+    /// Takes effect on the playing device, or when the next playlist starts.
+    pub async fn set_shuffle(&self, shuffle: bool) -> Result<(), String> {
+        let epoch = self.gate()?;
+        if self.0.state.lock().unwrap().active {
+            match self.send(Method::PUT, "/me/player/shuffle", &[("state", shuffle.to_string())], None).await {
+                Ok(()) | Err(Failure::NoActiveDevice) => {}
+                Err(failure) => return Err(self.on_failure(epoch, &failure)),
+            }
         }
-        self.update(link.epoch, |s| s.apply(Update::Shuffle(shuffle), Instant::now()));
+        self.update(epoch, |s| s.apply(Update::Shuffle(shuffle), Instant::now()));
+        self.settle();
         Ok(())
     }
 
-    /// Starts a playlist here, from `track` if given, honouring the shuffle switch.
-    pub fn play(&self, context: &str, track: Option<&str>) -> Result<(), String> {
-        let link = self.link()?;
+    /// Starts a playlist, from `track` if given, on the active device (or wakes one up).
+    pub async fn play(&self, context: &str, track: Option<&str>) -> Result<(), String> {
+        let epoch = self.gate()?;
         let context = playlist_id_of(context).map(|id| playlist_uri(&id)).ok_or("Playlist non valida.")?;
-        let playing_track = match track {
-            Some(t) => Some(PlayingTrack::Uri(track_uri(&track_id_of(t).ok_or("Brano non valido.")?))),
-            None => None,
-        };
-        let (shuffling, volume) = {
-            let state = self.0.state.lock().unwrap();
-            (state.shuffling, state.volume)
-        };
-        let shuffle = shuffling && playing_track.is_none();
-        let request = LoadRequest::from_context_uri(
-            context.clone(),
-            LoadRequestOptions {
-                start_playing: true,
-                seek_to: 0,
-                context_options: Some(LoadContextOptions::Options(Options { shuffle, ..Options::default() })),
-                playing_track,
-            },
-        );
-        // Activation is ignored when Spotteck is already the active device. It reports the
-        // device's last connect volume, so the slider's current level is sent right after.
-        Self::send(link.spirc.activate())?;
-        Self::send(link.spirc.set_volume(volume))?;
-        Self::send(link.spirc.load(request))?;
-        self.update(link.epoch, |s| s.apply(Update::Context(context), Instant::now()));
+        let mut body = json!({ "context_uri": context });
+        if let Some(t) = track {
+            body["offset"] = json!({ "uri": track_uri(&track_id_of(t).ok_or("Brano non valido.")?) });
+        }
+        let mut query = Vec::new();
+        match self.send(Method::PUT, "/me/player/play", &query, Some(body.clone())).await {
+            Ok(()) => {}
+            Err(Failure::NoActiveDevice) => {
+                query.push(("device_id", self.pick_device(epoch).await?));
+                self.send(Method::PUT, "/me/player/play", &query, Some(body))
+                    .await
+                    .map_err(|f| self.on_failure(epoch, &f))?;
+            }
+            Err(failure) => return Err(self.on_failure(epoch, &failure)),
+        }
+        // Spotteck's shuffle switch applies to the playlist it starts.
+        let shuffle = self.0.state.lock().unwrap().shuffling;
+        query.push(("state", shuffle.to_string()));
+        if let Err(failure) = self.send(Method::PUT, "/me/player/shuffle", &query, None).await {
+            log::info!("Shuffle not applied: {failure:?}");
+        }
+        self.update(epoch, |s| s.apply(Update::Context(context), Instant::now()));
+        self.settle();
         Ok(())
     }
 
     pub async fn profile(&self) -> Option<Profile> {
-        let link = self.0.link.lock().unwrap().clone()?;
-        let session = &link.session;
-        let username = session.username();
-        let product = match session.get_user_attribute("type").as_deref() {
-            Some("premium") | None => "Premium".to_owned(),
-            Some(other) => {
-                let mut chars = other.chars();
-                chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
-            }
-        };
-        let mut profile = Profile { name: username.clone(), product, avatar: String::new() };
-        if let Ok(bytes) = session.spclient().get_user_profile(&username, Some(0), Some(0)).await {
-            if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-                if let Some(name) = json["name"].as_str().filter(|n| !n.is_empty()) {
-                    profile.name = name.to_owned();
-                }
-                if let Some(url) = json["image_url"].as_str().filter(|u| u.starts_with("https://")) {
-                    profile.avatar = url.to_owned();
-                }
-            }
+        if let Some(profile) = self.0.profile.lock().unwrap().clone() {
+            return Some(profile);
         }
-        self.0.generation.is_current(link.epoch).then_some(profile)
+        let epoch = self.0.generation.current();
+        if matches!(self.readiness(), Readiness::SignedOut | Readiness::NeedsClientId) {
+            return None;
+        }
+        let me = self.0.api.get::<Me>("/me", &[]).await.ok().flatten()?;
+        let profile = profile_of(&me);
+        if !self.0.generation.is_current(epoch) {
+            return None;
+        }
+        *self.0.profile.lock().unwrap() = Some(profile.clone());
+        Some(profile)
     }
 
-    fn session(&self) -> Result<(u64, Session), String> {
-        self.link().map(|l| (l.epoch, l.session))
+    fn checked<T>(&self, epoch: u64, value: Result<T, String>) -> Result<T, String> {
+        if !self.0.generation.is_current(epoch) {
+            return Err("Account cambiato.".into());
+        }
+        value
     }
 
     pub async fn playlists(&self) -> Result<Vec<PlaylistEntry>, String> {
-        let (epoch, session) = self.session()?;
-        let list = self.0.library.playlists(&session).await?;
-        if !self.0.generation.is_current(epoch) {
-            return Err("Account cambiato.".into());
-        }
-        Ok(list)
+        let epoch = self.gate()?;
+        let list = self.0.library.playlists(&self.0.api).await;
+        self.checked(epoch, list)
     }
 
     pub async fn playlist(&self, id: &str) -> Result<PlaylistEntry, String> {
-        let (epoch, session) = self.session()?;
-        let entry = self.0.library.summary(&session, id).await?;
-        if !self.0.generation.is_current(epoch) {
-            return Err("Account cambiato.".into());
-        }
-        Ok(entry)
+        let epoch = self.gate()?;
+        let entry = self.0.library.summary(&self.0.api, id).await;
+        self.checked(epoch, entry)
     }
 
     pub async fn tracks(&self, id: &str) -> Result<Vec<TrackEntry>, String> {
-        let (epoch, session) = self.session()?;
-        let tracks = self.0.library.tracks(&session, id).await?;
-        if !self.0.generation.is_current(epoch) {
-            return Err("Account cambiato.".into());
-        }
-        Ok(tracks)
+        let epoch = self.gate()?;
+        let tracks = self.0.library.tracks(&self.0.api, id).await;
+        self.checked(epoch, tracks)
     }
 }
 
-fn track_update(item: &AudioItem) -> Update {
-    let (artist, album) = match &item.unique_fields {
-        UniqueFields::Track { artists, album, .. } => {
-            (artists.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(", "), album.clone())
-        }
-        UniqueFields::Local { artists, album, .. } => {
-            (artists.clone().unwrap_or_default(), album.clone().unwrap_or_default())
-        }
-        UniqueFields::Episode { show_name, .. } => (show_name.clone(), String::new()),
-    };
-    Update::Track {
-        uri: item.uri.clone(),
-        name: item.name.clone(),
-        artist,
-        album,
-        artwork: pick_cover(item.covers.iter().map(|c| (c.url.as_str(), c.width))).unwrap_or_default(),
-        duration_ms: item.duration_ms,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn profiles_fall_back_to_the_user_id_and_name_the_plan() {
+        let me: Me = serde_json::from_str(
+            r#"{"id": "anna", "display_name": "", "product": "free",
+                "images": [{"url": "https://i.scdn.co/image/a", "width": 300}]}"#,
+        )
+        .unwrap();
+        let profile = profile_of(&me);
+        assert_eq!(profile.name, "anna");
+        assert_eq!(profile.product, "Free");
+        assert_eq!(profile.avatar, "https://i.scdn.co/image/a");
+        let me: Me = serde_json::from_str(r#"{"id": "x", "display_name": "Anna"}"#).unwrap();
+        assert_eq!(profile_of(&me).product, "Premium");
+        assert_eq!(profile_of(&me).name, "Anna");
     }
 }

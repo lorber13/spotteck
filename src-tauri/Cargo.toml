@@ -1,6 +1,6 @@
 [package]
 name = "spotteck"
-description = "Spotteck: a Braun-style Spotify Premium player with analog visualizers"
+description = "Spotteck: a Braun-style remote for Spotify Premium with analog visualizers, built on the official Web API"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,14 +13,14 @@ tauri-build = { version = "=2.7.4", features = [] }
 [dependencies]
 spotteck-core.workspace = true
 spotteck-spotify.workspace = true
+spotteck-capture.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
 tokio.workspace = true
 tauri = { version = "=2.12.5", features = [] }
 tauri-plugin-window-state = "=2.5.0"
-souvlaki = { version = "=0.9.3", default-features = false, features = ["use_zbus"] }
-uuid = { version = "1", features = ["v4"] }
+open = "5"
 env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
