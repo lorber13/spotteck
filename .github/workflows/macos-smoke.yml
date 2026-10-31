@@ -1,0 +1,97 @@
+name: macOS smoke test
+
+# Temporary: builds the .dmg on a macOS runner, launches Spotteck signed out and collects a screenshot and the logs.
+on:
+  push:
+    branches: [ccr-4362888e-5j5lbo]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  smoke:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: sw_vers && uname -m
+      - run: npm ci
+      - run: npm test
+      - run: npm run dist
+
+      - name: Bundle checks
+        run: |
+          APP=target/release/bundle/macos/Spotteck.app
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -E "Identifier|Signature|TeamIdentifier|flags"
+          EXE=$(plutil -extract CFBundleExecutable raw "$APP/Contents/Info.plist")
+          echo "executable: $EXE"
+          echo "bundle id:  $(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")"
+          echo "min macOS:  $(plutil -extract LSMinimumSystemVersion raw "$APP/Contents/Info.plist")"
+          echo "version:    $(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")"
+          lipo -archs "$APP/Contents/MacOS/$EXE"
+          otool -L "$APP/Contents/MacOS/$EXE"
+          if otool -L "$APP/Contents/MacOS/$EXE" | tail -n +2 | grep -vE "^\s+/(System/Library|usr/lib)/"; then
+            echo "::error::links against a library outside the system"; exit 1
+          fi
+          ls -la target/release/bundle/dmg/
+
+      - name: Install from the DMG
+        run: |
+          DMG=$(ls target/release/bundle/dmg/*.dmg | head -1)
+          MNT=$(mktemp -d)
+          hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT"
+          ls -la "$MNT"
+          mkdir -p "$RUNNER_TEMP/Applications"
+          cp -R "$MNT/Spotteck.app" "$RUNNER_TEMP/Applications/"
+          hdiutil detach "$MNT"
+          xattr -cr "$RUNNER_TEMP/Applications/Spotteck.app"
+          codesign --verify --deep --strict "$RUNNER_TEMP/Applications/Spotteck.app"
+
+      - name: Launch and check
+        run: |
+          APP="$RUNNER_TEMP/Applications/Spotteck.app"
+          EXE=$(plutil -extract CFBundleExecutable raw "$APP/Contents/Info.plist")
+          mkdir -p smoke
+          # Through LaunchServices, as Finder would, so the AppleScript quit below reaches this instance.
+          open -n "$APP" --env RUST_LOG=info --stdout "$PWD/smoke/app.log" --stderr "$PWD/smoke/app.log"
+          sleep 3
+          PID=$(pgrep -f "$APP/Contents/MacOS/$EXE" | head -1)
+          [ -n "$PID" ] || { echo "::error::Spotteck did not start"; cat smoke/app.log; exit 1; }
+          echo "pid $PID"
+          sleep 17
+          if ! kill -0 "$PID" 2>/dev/null; then
+            echo "::error::Spotteck exited within 20 s"; cat smoke/app.log; exit 1
+          fi
+          ps -o pid,rss,%cpu,etime,command -p "$PID"
+          osascript -e 'tell application "System Events" to get {name, position, size} of every window of (first process whose unix id is '"$PID"')' || echo "(System Events not available)"
+          screencapture -x smoke/screen.png || echo "(screencapture failed)"
+          if [ -f smoke/screen.png ]; then
+            sips -g pixelWidth -g pixelHeight smoke/screen.png
+            sips -Z 1100 -s format jpeg -s formatOptions 55 smoke/screen.png --out smoke/screen.jpg >/dev/null
+            echo "----BEGIN SCREENSHOT----"; base64 -i smoke/screen.jpg | fold -w 1000; echo "----END SCREENSHOT----"
+          fi
+          osascript -e 'tell application id "com.braun.spotteck" to quit' || kill "$PID"
+          for i in $(seq 1 10); do kill -0 "$PID" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$PID" 2>/dev/null; then
+            echo "::warning::Spotteck did not quit within 10 s"; kill -9 "$PID"
+          else
+            echo "quit cleanly"
+          fi
+          echo "----APP LOG----"; cat smoke/app.log
+          echo "----CRASH REPORTS----"
+          ls -la ~/Library/Logs/DiagnosticReports 2>/dev/null | grep -i spotteck || echo "none"
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-smoke
+          path: |
+            smoke/
+            target/release/bundle/dmg/*.dmg
