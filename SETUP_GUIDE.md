@@ -1,16 +1,27 @@
-# Spotteck 2.0 — installazione e sviluppo
+# Spotteck 3.0 — installazione e sviluppo
+
+Spotteck usa **solo le API ufficiali di Spotify**: la Web API per comandi, stato e libreria, l’accesso OAuth (PKCE) di `accounts.spotify.com` e oEmbed per le copertine delle playlist aggiunte. Non riproduce l’audio da sé: è un telecomando per le app Spotify ufficiali.
 
 ## Requisiti
 
-Un account **Spotify Premium** (anche Family, Duo o Student) e uno di questi sistemi:
+- Un account **Spotify Premium** (anche Family, Duo o Student): i comandi di riproduzione della Web API richiedono Premium. Gli account Free non sono supportati e Spotteck lo segnala nelle Impostazioni.
+- L’app **Spotify ufficiale** aperta da qualche parte: su questo computer (Spotify Desktop), sul telefono o su un altoparlante Spotify Connect. Spotteck comanda il dispositivo attivo; se non ce n’è uno, sveglia Spotify su questo computer.
+- Una **app Spotify for Developers** tua, gratuita, per il Client ID (vedi sotto).
+- Uno di questi sistemi:
+  - **macOS** 14.2 o successivo (Apple Silicon): la piattaforma principale;
+  - **Linux** con WebKitGTK 4.1, PipeWire e un portachiavi Secret Service (GNOME Keyring o KWallet);
+  - **Windows** 10 versione 2004 o successiva / Windows 11, con WebView2 (già presente su Windows 11).
 
-- **macOS** 14.2 o successivo (Apple Silicon): la piattaforma principale;
-- **Linux** con WebKitGTK 4.1, ALSA/PipeWire e un portachiavi Secret Service (GNOME Keyring o KWallet);
-- **Windows** 10/11 con WebView2 (già presente su Windows 11).
+## Creare la tua app Spotify (Client ID)
 
-Gli account Free non sono supportati: Spotteck lo segnala nelle Impostazioni.
+Ogni utente usa la propria app: Spotify limita le app in modalità sviluppo a pochi utenti, e così il tuo accesso non dipende da nessun altro. Ci vogliono due minuti.
 
-Spotteck riproduce l’audio da solo, come dispositivo Spotify Connect. Non serve Spotify Desktop, nessun motore esterno, nessuna chiave personale e nessun Client ID.
+1. In Spotteck apri le **Impostazioni** e premi **Apri dashboard** (oppure vai su <https://developer.spotify.com/dashboard>) e accedi con il tuo account Spotify.
+2. Premi **Create app**. Nome e descrizione sono a scelta (es. «Spotteck»).
+3. In **Redirect URIs** aggiungi esattamente `http://127.0.0.1:43821/callback` (nelle Impostazioni c’è il tasto **Copia**).
+4. In **Which API/SDKs are you planning to use?** seleziona **Web API**, accetta i termini e salva.
+5. Apri **Settings** dell’app, copia il **Client ID** (32 caratteri) e incollalo in Spotteck, poi premi **Salva**. Non serve il Client Secret: Spotteck non lo usa.
+6. Se vuoi usare l’app anche con altri account Spotify, aggiungili in **User Management** della dashboard.
 
 ## Installare
 
@@ -28,24 +39,28 @@ Dati e playlist aggiunte restano nella cartella dati dell’app (`~/Library/Appl
 
 ## Account e riproduzione
 
-1. Apri le Impostazioni e premi **Accedi**. Il browser mostra la pagina di accesso di Spotify; al termine torna a Spotteck.
-2. L’accesso riutilizzabile è salvato nel portachiavi di sistema (Portachiavi di macOS, Gestione credenziali di Windows, Secret Service su Linux): ai riavvii successivi Spotteck si ricollega da solo. Su Linux senza un portachiavi attivo l’accesso va ripetuto a ogni avvio.
-3. La griglia mostra le playlist della tua libreria Spotify. Con **+** puoi aggiungere altre playlist incollando il link (Spotify: Condividi → Copia link alla playlist).
-4. Spotteck compare come dispositivo Spotify Connect anche nell’app Spotify del telefono: da lì puoi spostare la riproduzione sul computer. Se un altro dispositivo sta suonando, Play su Spotteck porta la riproduzione qui.
-5. L’uscita è sempre quella predefinita del sistema. Lo slider controlla il volume di Spotteck. I tasti multimediali funzionano tramite Now Playing e Centro di controllo su macOS, MPRIS su Linux e i controlli multimediali di Windows.
+1. Dopo aver salvato il Client ID premi **Accedi**. Il browser mostra la pagina di accesso di Spotify con i permessi richiesti (profilo e piano, stato e comandi della riproduzione, le tue playlist); al termine torna a Spotteck.
+2. L’accesso è salvato nel portachiavi di sistema (Portachiavi di macOS, Gestione credenziali di Windows, Secret Service su Linux): ai riavvii successivi Spotteck si ricollega da solo. Su Linux senza un portachiavi attivo l’accesso va ripetuto a ogni avvio. Chi aggiorna da Spotteck 2 deve inserire il Client ID e accedere di nuovo.
+3. La griglia mostra le playlist della tua libreria Spotify. Con **+** puoi aggiungere altre playlist incollando il link (Spotify: Condividi → Copia link alla playlist). Spotify elenca i brani solo delle playlist tue o collaborative: le altre si avviano comunque con un clic.
+4. I comandi vanno al dispositivo Spotify che sta suonando (computer, telefono, altoparlante). Se nessuno è attivo, Play riprende su Spotify di questo computer, altrimenti sul primo dispositivo disponibile. Lo slider regola il volume di quel dispositivo, dove Spotify lo consente.
+5. I tasti multimediali e Now Playing restano all’app Spotify ufficiale.
 
-**Disconnetti** ferma la riproduzione e cancella l’accesso dal portachiavi; le playlist aggiunte con + restano.
+**Disconnetti** cancella l’accesso dal portachiavi; la riproduzione sui tuoi dispositivi continua e le playlist aggiunte con + restano. Cambiare Client ID richiede un nuovo accesso.
 
 ## Visualizzatori
 
-Spotteck analizza direttamente l’audio che sta riproducendo. Non chiede permessi di registrazione, non apre il microfono e non salva nulla. Spettro, onda e i due VU (RMS e picchi stereo separati) seguono il segnale reale; in pausa i visualizzatori restano fermi.
+I visualizzatori ascoltano soltanto l’audio dell’app Spotify **su questo computer**, con l’acquisizione per processo del sistema operativo: non aprono il microfono, non salvano nulla e non cambiano l’uscita audio. Spettro, onda e i due VU (RMS e picchi stereo separati) seguono il segnale reale; in pausa, o quando Spotify suona su un altro dispositivo, restano fermi.
+
+- **macOS:** un *process tap* di Core Audio su Spotify. Al primo uso macOS chiede il permesso «Registrazione solo audio di sistema»; se l’hai negato, riattivalo in **Impostazioni di Sistema → Privacy e sicurezza → Registrazione schermo e audio di sistema**.
+- **Windows:** la cattura per processo di WASAPI (process loopback) su Spotify.exe; nessun permesso richiesto.
+- **Linux:** uno stream PipeWire collegato a quello di Spotify (come `pw-record --target`); non passa mai ad altre sorgenti. Senza PipeWire i visualizzatori non sono disponibili.
 
 ## Sviluppo
 
 Su tutte le piattaforme servono Rust (stable, ≥ 1.85) e Node.js ≥ 22 con npm. In più:
 
 - **macOS:** Xcode Command Line Tools (`xcode-select --install`).
-- **Linux** (Debian/Ubuntu): `sudo apt install build-essential libwebkit2gtk-4.1-dev libasound2-dev libssl-dev libdbus-1-dev librsvg2-dev file`.
+- **Linux** (Debian/Ubuntu): `sudo apt install build-essential libwebkit2gtk-4.1-dev libpipewire-0.3-dev libclang-dev libssl-dev libdbus-1-dev librsvg2-dev file`.
 - **Windows:** Visual Studio Build Tools con «Sviluppo di applicazioni desktop con C++» e WebView2.
 
 ```
@@ -63,9 +78,10 @@ I pacchetti finiscono in `target/release/bundle/`. Su macOS `Spotteck.app` è fi
 
 Il codice Rust è diviso in:
 
-- `crates/spotteck-core`: stato del lettore, disponibilità, playlist aggiunte, analisi audio. Nessuna dipendenza di sistema: i test girano su qualsiasi piattaforma.
-- `crates/spotteck-spotify`: collegamento a Spotify tramite librespot (accesso, Spotify Connect, libreria, copia dell’audio per i visualizzatori).
-- `src-tauri`: l’app Tauri (finestra, comandi, eventi, portachiavi, controlli multimediali).
+- `crates/spotteck-core`: stato del lettore, disponibilità, risposte della Web API, PKCE, impostazioni, playlist aggiunte, analisi audio. Nessuna dipendenza di sistema: i test girano su qualsiasi piattaforma.
+- `crates/spotteck-spotify`: il collegamento a Spotify, solo tramite la Web API ufficiale (accesso PKCE con il tuo Client ID, comandi al dispositivo attivo, stato, libreria).
+- `crates/spotteck-capture`: l’audio per i visualizzatori, catturato dal processo di Spotify (Core Audio, WASAPI, PipeWire).
+- `src-tauri`: l’app Tauri (finestra, comandi, eventi, portachiavi).
 - `ui`: l’interfaccia HTML/CSS/JS.
 
-librespot è una libreria open source non ufficiale: se Spotify cambia il protocollo, può servire aggiornarla.
+`tests/official-only.test.js` (in `npm test`) fallisce se compaiono client Spotify non ufficiali, Client ID altrui o endpoint privati di Spotify.
