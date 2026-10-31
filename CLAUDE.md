@@ -22,7 +22,7 @@ npm run dist                  # bundles for the host OS: .app + .dmg | .deb + .A
 npm run pack:mac / dist:mac   # the same for aarch64-apple-darwin
 ```
 
-Linux needs `libwebkit2gtk-4.1-dev libasound2-dev libssl-dev libdbus-1-dev librsvg2-dev file`; Windows needs the MSVC Build Tools and WebView2. Per-OS bundle targets live in `src-tauri/tauri.{linux,windows}.conf.json`, merged by Tauri over `tauri.conf.json` (whose `app`/`dmg` targets and macOS window keys apply on macOS). `.github/workflows/ci.yml` runs fmt + clippy (`-D warnings`), `npm test` on ubuntu/macos/windows, and `check:ui` (installs Playwright with `--no-save`, so don't add it to package.json); the release `bundle` matrix runs only on `main`, `v*` tags and manual dispatch.
+Linux needs `libwebkit2gtk-4.1-dev libasound2-dev libssl-dev libdbus-1-dev librsvg2-dev file`; Windows needs the MSVC Build Tools and WebView2. Per-OS bundle targets live in `src-tauri/tauri.{linux,windows}.conf.json`, merged by Tauri over `tauri.conf.json` (whose `app`/`dmg` targets and macOS window keys apply on macOS). `.github/workflows/ci.yml` runs only on pushes to `main`, `v*` tags, pull requests into `main` and manual dispatch: fmt + clippy (`-D warnings`), `npm test` on ubuntu/macos/windows, and `check:ui` (installs Playwright with `--no-save`, so don't add it to package.json); the release `bundle` matrix runs on all of those except pull requests.
 
 ## Architecture
 
